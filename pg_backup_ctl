@@ -1,0 +1,166 @@
+#!/bin/bash
+
+set -e
+
+me=$(basename $0)
+
+help="\
+PostgreSQL transaction log archival backup control program
+
+Usage:
+  $me MODE [OPTION...]
+
+Modes:
+  setup          prepare server for transaction log archival
+  basebackup     perform a base backup
+  currentbackup  backup the current WAL file (run from cron job)
+  cleanup        remove old WAL files after new base backup (run from cron job)
+
+Options:
+  -A DIR       archival target directory
+  -h HOSTNAME  server host name
+  -p PORT      server port
+  -U USERNAME  user name for database connections
+"
+
+if [ "$1" = "--help" ]; then
+    echo "$help"
+    exit 0
+fi
+
+
+set -- $(getopt A:h:p:U: "$@")
+
+while :; do
+    case $1 in
+        -A) archivedir=$2; shift;;
+        -h) export PGHOST=$2; shift;;
+        -p) export PGPORT=$2; shift;;
+        -U) export PGUSER=$2; shift;;
+        --) shift; break;;
+    esac
+    shift
+done
+
+export PGDATABASE=template1
+
+mode=$1
+
+
+error() {
+    echo "$me:" "$@" 1>&2
+    exit 1
+}
+
+
+current_setting() {
+    psql -tA -c "SELECT current_setting('$1');"
+}
+
+
+timestamp() {
+    date -u +'%Y-%m-%dT%H:%M:%S'
+}
+
+
+check_archivedir() {
+    if [ -z "$archivedir" ]; then
+        error "no archive directory specified"
+    fi
+
+    (umask 077; mkdir -p "$archivedir"/{base,log,current})
+    chown -R --reference="$(current_setting data_directory)" "$archivedir"
+}
+
+
+check_datadir() {
+    local datadir=$1
+    if [ ! -r "$datadir"/PG_VERSION ]; then
+        error "cannot read data directory (permissions?)"
+    fi
+}
+
+
+do_setup() {
+    local datadir=$(current_setting data_directory)
+    check_datadir "$datadir"
+
+    if [ $(ls "$datadir"/pg_tblspc | wc -l) -gt 0 ]; then
+        error "tablespaces not supported"
+    fi
+
+    check_archivedir
+
+    local cmd="test ! -f \\\\'$archivedir/log/%f\\\\' && cp \\\\'%p\\\\' \\\\'$archivedir/log/%f\\\\'"
+    local cf=$(current_setting config_file)
+
+    if grep -q archive_command "$cf"; then
+        sed -i -e '/archive_command/ c\' -e "archive_command = '$cmd'" "$cf"
+    else
+        (echo; echo "# automatically added by $0"; echo "archive_command = '$cmd'") >>$cf
+    fi
+
+    kill -HUP $(head -1 "$datadir/postmaster.pid")
+}
+
+
+do_currentbackup() {
+    check_archivedir
+
+    local datadir=$(current_setting data_directory)
+    local files x y
+
+    for x in $(ls -r "$datadir"/pg_xlog/ | egrep '^[0-9A-F]{24}$'); do
+        if [ ! -f "$datadir"/pg_xlog/archive_status/$x.done ]; then
+            files="$files $x"
+        fi
+    done
+
+    (cd "$datadir"/pg_xlog/ && rsync $files "$archivedir"/current/)
+    for x in $(cd "$archivedir"/current && ls); do
+        for y in $files; do
+            [ $x = $y ] && break 2
+        done
+        rm "$archivedir"/current/$x
+    done
+}
+
+
+do_basebackup() {
+    if [ "$(current_setting archive_command)" = unset ]; then
+        error "archiving not enabled (run \"setup\" first)"
+    fi
+
+    check_archivedir
+
+    local datadir=$(current_setting data_directory)
+
+    psql -c "SELECT pg_start_backup('$archivedir');" >/dev/null
+    tar -C "$datadir" -c -z -f "$archivedir"/base/basebackup-$(timestamp).tar.gz --anchored --exclude=pg_xlog .
+    psql -c "SELECT pg_stop_backup();" >/dev/null
+}
+
+
+do_cleanup() {
+    local last_backup=$(cd "$archivedir"/log && ls -r *.backup | head -1)
+    local first_wal=${last_backup%.*.backup}
+
+    if [ -f "$archivedir/log/$first_wal" ]; then
+        local old_files=$(ls "$archivedir"/log | sed -n "/$first_wal/q;p")
+        (cd "$archivedir"/log && rm -f $old_files)
+    fi
+}
+
+
+case $mode in
+    setup)
+        do_setup;;
+    currentbackup)
+        do_currentbackup;;
+    basebackup)
+        do_basebackup;;
+    cleanup)
+        do_cleanup;;
+    *)
+        error "invalid mode";;
+esac
