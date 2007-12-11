@@ -42,7 +42,7 @@ while :; do
     shift
 done
 
-export PGDATABASE=template1
+export PGDATABASE=postgres
 
 mode=$1
 
@@ -69,7 +69,7 @@ check_archivedir() {
     fi
 
     (umask 077; mkdir -p "$archivedir"/{base,log,current})
-    chown -R --reference="$(current_setting data_directory)" "$archivedir"
+    chown --reference="$(current_setting data_directory)" "$archivedir"/{,base,log,current}
 }
 
 
@@ -78,6 +78,21 @@ check_datadir() {
     if [ ! -r "$datadir"/PG_VERSION ]; then
         error "cannot read data directory (permissions?)"
     fi
+}
+
+
+find_first_wal_file() {
+    local label=$1
+    local hit x
+    for x in "$archivedir"/log/*.backup; do
+        if grep -q "^LABEL: $label\$" "$x"; then
+            if [ -n "$hit" ]; then
+               error "backup label \"$label\" found in multiple backup files (\"$hit\" and \"$x\")"
+            fi
+            hit=$x
+        fi
+    done
+    echo "${hit%.*.backup}"
 }
 
 
@@ -127,7 +142,8 @@ do_currentbackup() {
 
 
 do_basebackup() {
-    if [ "$(current_setting archive_command)" = unset ]; then
+    local archivecmd=$(current_setting archive_command)
+    if [ "$archivecmd" = unset ] || [ -z "$archivecmd" ]; then
         error "archiving not enabled (run \"setup\" first)"
     fi
 
@@ -135,9 +151,18 @@ do_basebackup() {
 
     local datadir=$(current_setting data_directory)
 
-    psql -c "SELECT pg_start_backup('$archivedir');" >/dev/null
-    tar -C "$datadir" -c -z -f "$archivedir"/base/basebackup-$(timestamp).tar.gz --anchored --exclude=pg_xlog .
+    local fn="$archivedir"/base/basebackup-$(timestamp).tar.gz
+    local label=$(uuid):"$fn"
+    psql -c "SELECT pg_start_backup('$label');" >/dev/null
+    tar -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 2 ]
     psql -c "SELECT pg_stop_backup();" >/dev/null
+    while true; do
+        local first_wal=$(find_first_wal_file "$label")
+        if [ -n "$first_wal" ] && [ -f "$first_wal" ]; then
+            break
+        fi
+        sleep 1
+    done
 }
 
 
