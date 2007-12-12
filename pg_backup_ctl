@@ -59,7 +59,7 @@ current_setting() {
 
 
 timestamp() {
-    date -u +'%Y-%m-%dT%H:%M:%S'
+    date +'%Y-%m-%dT%H:%M:%S.%N%:z'
 }
 
 
