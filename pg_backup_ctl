@@ -97,7 +97,7 @@ do_setup() {
     if grep -q archive_command "$cf"; then
         sed -i -e '/archive_command/ c\' -e "archive_command = '$cmd'" "$cf"
     else
-        (echo; echo "# automatically added by $0"; echo "archive_command = '$cmd'") >>$cf
+        (echo; echo "# automatically added by $me"; echo "archive_command = '$cmd'") >>$cf
     fi
 
     kill -HUP $(head -1 "$datadir/postmaster.pid")
