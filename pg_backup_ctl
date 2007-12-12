@@ -81,21 +81,6 @@ check_datadir() {
 }
 
 
-find_first_wal_file() {
-    local label=$1
-    local hit x
-    for x in "$archivedir"/log/*.backup; do
-        if grep -q "^LABEL: $label\$" "$x"; then
-            if [ -n "$hit" ]; then
-               error "backup label \"$label\" found in multiple backup files (\"$hit\" and \"$x\")"
-            fi
-            hit=$x
-        fi
-    done
-    echo "${hit%.*.backup}"
-}
-
-
 do_setup() {
     local datadir=$(current_setting data_directory)
     check_datadir "$datadir"
@@ -152,17 +137,9 @@ do_basebackup() {
     local datadir=$(current_setting data_directory)
 
     local fn="$archivedir"/base/basebackup-$(timestamp).tar.gz
-    local label=$(uuid):"$fn"
-    psql -c "SELECT pg_start_backup('$label');" >/dev/null
+    psql -c "SELECT pg_start_backup('$fn');" >/dev/null
     tar -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 2 ]
     psql -c "SELECT pg_stop_backup();" >/dev/null
-    while true; do
-        local first_wal=$(find_first_wal_file "$label")
-        if [ -n "$first_wal" ] && [ -f "$first_wal" ]; then
-            break
-        fi
-        sleep 1
-    done
 }
 
 
