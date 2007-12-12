@@ -1,7 +1,7 @@
 #!/bin/bash
 
 set -e
-
+umask 077
 export LC_COLLATE=C
 
 me=$(basename $0)
@@ -23,6 +23,7 @@ Options:
   -h HOSTNAME  server host name
   -p PORT      server port
   -U USERNAME  user name for database connections
+  -z           use gzip to compress archived WAL segments
 "
 
 if [ "$1" = "--help" ]; then
@@ -31,7 +32,7 @@ if [ "$1" = "--help" ]; then
 fi
 
 
-set -- $(getopt A:h:p:U: "$@")
+set -- $(getopt A:h:p:U:z "$@")
 
 while :; do
     case $1 in
@@ -39,6 +40,7 @@ while :; do
         -h) export PGHOST=$2; shift;;
         -p) export PGPORT=$2; shift;;
         -U) export PGUSER=$2; shift;;
+        -z) gzip=yes;;
         --) shift; break;;
     esac
     shift
@@ -46,7 +48,7 @@ done
 
 export PGDATABASE=postgres
 
-mode=$1
+mode=$1; shift
 
 
 error() {
@@ -93,7 +95,12 @@ do_setup() {
 
     check_archivedir
 
-    local cmd="test ! -f \\\\'$archivedir/log/%f\\\\' && cp \\\\'%p\\\\' \\\\'$archivedir/log/%f\\\\'"
+    local cmd
+    if [ "$gzip" = yes ]; then
+        cmd="test ! -f \\\\'$archivedir/log/%f.gz\\\\' && gzip -c \\\\'%p\\\\' > \\\\'$archivedir/log/%f.gz\\\\'"
+    else
+        cmd="test ! -f \\\\'$archivedir/log/%f\\\\' && cp \\\\'%p\\\\' \\\\'$archivedir/log/%f\\\\'"
+    fi
     local cf=$(current_setting config_file)
 
     if grep -q archive_command "$cf"; then
@@ -138,18 +145,58 @@ do_basebackup() {
 
     local datadir=$(current_setting data_directory)
 
-    local fn="$archivedir"/base/basebackup-$(timestamp).tar.gz
+    local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 2 ]
+    tar --force-local -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 2 ]
     psql -c "SELECT pg_stop_backup();" >/dev/null
 }
 
 
-do_cleanup() {
-    local last_backup=$(cd "$archivedir"/log && ls -r *.backup | head -1)
-    local first_wal=${last_backup%.*.backup}
+start_wal_location() { 
+    sed -n -r '/^START WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
+}
 
-    if [ -f "$archivedir/log/$first_wal" ]; then
+
+stop_wal_location() { 
+    sed -n -r '/^STOP WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
+}
+
+
+do_cleanup() {
+    local first_wal last_wal x
+
+    local fn=$(basename "$1")
+    case $fn in
+        basebackup_*.tar*)
+            first_wal=$(gunzip -c -f "$1" | tar -f - -x -O ./backup_label | start_wal_location)
+            ;;
+        [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup*)
+            first_wal=$(gunzip -c -f "$1" | start_wal_location)
+            last_wal=$(gunzip -c -f "$1" | stop_wal_location)
+            if [ ! -f "$archivedir"/log/$last_wal* ]; then
+                error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
+            fi
+            ;;
+        '')
+            local last_backup
+            for x in $(ls -r "$archivedir"/log/*.backup* | head -1); do
+                last_wal=$(gunzip -c -f "$x" | stop_wal_location)
+                if [ -f "$archivedir"/log/$last_wal ] || [ -f "$archivedir"/log/$last_wal.gz ] ; then
+                    last_backup=$x
+                    break
+                fi
+            done
+            if [ -z "$last_backup" ]; then
+                error "no complete backup found"
+            fi
+            first_wal=$(gunzip -c -f "$last_backup" | start_wal_location)
+            ;;
+        *)
+            error "invalid cleanup target specification"
+            ;;
+    esac
+
+    if [ -f "$archivedir"/log/$first_wal ] || [ -f "$archivedir"/log/$first_wal.gz ]; then
         local old_files=$(ls "$archivedir"/log | sed -n "/$first_wal/q;p")
         (cd "$archivedir"/log && rm -f $old_files)
     fi
@@ -164,7 +211,7 @@ case $mode in
     basebackup)
         do_basebackup;;
     cleanup)
-        do_cleanup;;
+        do_cleanup "$@";;
     *)
         error "invalid mode";;
 esac
