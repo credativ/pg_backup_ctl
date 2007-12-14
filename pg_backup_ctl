@@ -1,7 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 
 set -e
 umask 077
+# This is required so that sorted directory listings are consistent.
 export LC_COLLATE=C
 
 me=$(basename $0)
@@ -65,6 +66,8 @@ current_setting() {
 
 
 check_dirs() {
+    # Especially when calling currentbackup, specifying a data directory
+    # directly is advisable to avoid frequent database connections.
     if [ -z "$datadir" ]; then
         datadir="$(current_setting data_directory)"
     fi
@@ -118,13 +121,17 @@ do_currentbackup() {
 
     local files x y
 
+    # identify inarchived files
     for x in $(ls -r "$datadir"/pg_xlog/ | egrep '^[0-9A-F]{24}$'); do
         if [ ! -f "$datadir"/pg_xlog/archive_status/$x.done ]; then
             files="$files $x"
         fi
     done
 
+    # copy unarchived files
     (cd "$datadir"/pg_xlog/ && rsync $files "$archivedir"/current/)
+
+    # remove previously copied files that are now archived
     for x in $(cd "$archivedir"/current && ls); do
         for y in $files; do
             [ $x = $y ] && break 2
@@ -136,6 +143,7 @@ do_currentbackup() {
 
 do_basebackup() {
     check_dirs
+    # A detailed timestamp is good to uniquely identify a backup.
     local timestamp=$(date +'%Y-%m-%dT%H:%M:%S.%N%:z')
 
     local fn="$archivedir"/base/basebackup_${timestamp}.tar.gz
