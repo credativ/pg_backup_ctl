@@ -19,7 +19,8 @@ Modes:
   cleanup        remove old WAL files after new base backup (run from cron job)
 
 Options:
-  -A DIR       archival target directory
+  -A DIR       archival target directory (required)
+  -D DIR       database system directory (recommended)
   -h HOSTNAME  server host name
   -p PORT      server port
   -U USERNAME  user name for database connections
@@ -32,11 +33,12 @@ if [ "$1" = "--help" ]; then
 fi
 
 
-set -- $(getopt A:h:p:U:z "$@")
+set -- $(getopt A:D:h:p:U:z "$@")
 
 while :; do
     case $1 in
         -A) archivedir=$2; shift;;
+        -D) datadir=$2; shift;;
         -h) export PGHOST=$2; shift;;
         -p) export PGPORT=$2; shift;;
         -U) export PGUSER=$2; shift;;
@@ -62,38 +64,36 @@ current_setting() {
 }
 
 
-timestamp() {
-    date +'%Y-%m-%dT%H:%M:%S.%N%:z'
-}
+check_dirs() {
+    if [ -z "$datadir" ]; then
+        datadir="$(current_setting data_directory)"
+    fi
 
+    if [ ! -r "$datadir"/PG_VERSION ]; then
+        error "cannot read data directory (permissions?)"
+    fi
 
-check_archivedir() {
     if [ -z "$archivedir" ]; then
         error "no archive directory specified"
     fi
 
-    (umask 077; mkdir -p "$archivedir"/{base,log,current})
-    chown --reference="$(current_setting data_directory)" "$archivedir"/{,base,log,current}
-}
+    local x
 
-
-check_datadir() {
-    local datadir=$1
-    if [ ! -r "$datadir"/PG_VERSION ]; then
-        error "cannot read data directory (permissions?)"
-    fi
+    for x in "$archivedir"/{base,log,current}; do
+        if [ ! -d "$x" ]; then
+            mkdir -p "$x"
+            chown --reference="$datadir" "$x"
+        fi
+    done
 }
 
 
 do_setup() {
-    local datadir=$(current_setting data_directory)
-    check_datadir "$datadir"
+    check_dirs
 
     if [ $(ls "$datadir"/pg_tblspc | wc -l) -gt 0 ]; then
         error "tablespaces not supported"
     fi
-
-    check_archivedir
 
     local cmd
     if [ "$gzip" = yes ]; then
@@ -114,9 +114,8 @@ do_setup() {
 
 
 do_currentbackup() {
-    check_archivedir
+    check_dirs
 
-    local datadir=$(current_setting data_directory)
     local files x y
 
     for x in $(ls -r "$datadir"/pg_xlog/ | egrep '^[0-9A-F]{24}$'); do
@@ -136,16 +135,10 @@ do_currentbackup() {
 
 
 do_basebackup() {
-    local archivecmd=$(current_setting archive_command)
-    if [ "$archivecmd" = unset ] || [ -z "$archivecmd" ]; then
-        error "archiving not enabled (run \"setup\" first)"
-    fi
+    check_dirs
+    local timestamp=$(date +'%Y-%m-%dT%H:%M:%S.%N%:z')
 
-    check_archivedir
-
-    local datadir=$(current_setting data_directory)
-
-    local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
+    local fn="$archivedir"/base/basebackup_${timestamp}.tar.gz
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
     tar --force-local -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 2 ]
     psql -c "SELECT pg_stop_backup();" >/dev/null
