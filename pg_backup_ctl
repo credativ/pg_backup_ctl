@@ -121,7 +121,7 @@ do_currentbackup() {
 
     local files x y
 
-    # identify inarchived files
+    # identify unarchived files
     for x in $(ls -r "$datadir"/pg_xlog/ | egrep '^[0-9A-F]{24}$'); do
         if [ ! -f "$datadir"/pg_xlog/archive_status/$x.done ]; then
             files="$files $x"
