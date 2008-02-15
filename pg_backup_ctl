@@ -23,6 +23,7 @@ Options:
   -A DIR       archival target directory (required)
   -D DIR       database system directory (recommended)
   -h HOSTNAME  server host name
+  -m           archive old log files before deleting them
   -p PORT      server port
   -U USERNAME  user name for database connections
   -z           use gzip to compress archived WAL segments
@@ -34,13 +35,14 @@ if [ "$1" = "--help" ]; then
 fi
 
 
-set -- $(getopt A:D:h:p:U:z "$@")
+set -- $(getopt A:D:h:mp:U:z "$@")
 
 while :; do
     case $1 in
         -A) archivedir=$2; shift;;
         -D) datadir=$2; shift;;
         -h) export PGHOST=$2; shift;;
+        -m) cleanup_move=yes;;
         -p) export PGPORT=$2; shift;;
         -U) export PGUSER=$2; shift;;
         -z) gzip=yes;;
@@ -62,6 +64,12 @@ error() {
 
 current_setting() {
     psql -tA -c "SELECT current_setting('$1');"
+}
+
+
+timestamp() {
+    # A detailed timestamp is good to uniquely identify a backup.
+    date +'%Y-%m-%dT%H:%M:%S.%N%:z'
 }
 
 
@@ -143,12 +151,10 @@ do_currentbackup() {
 
 do_basebackup() {
     check_dirs
-    # A detailed timestamp is good to uniquely identify a backup.
-    local timestamp=$(date +'%Y-%m-%dT%H:%M:%S.%N%:z')
 
-    local fn="$archivedir"/base/basebackup_${timestamp}.tar.gz
+    local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar --force-local -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 2 ]
+    tar --force-local -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 1 ]
     psql -c "SELECT pg_stop_backup();" >/dev/null
 }
 
@@ -199,7 +205,13 @@ do_cleanup() {
 
     if [ -f "$archivedir"/log/$first_wal ] || [ -f "$archivedir"/log/$first_wal.gz ]; then
         local old_files=$(ls "$archivedir"/log | sed -n "/$first_wal/q;p")
-        (cd "$archivedir"/log && rm -f $old_files)
+        (
+        cd "$archivedir"/log
+        if [ "$cleanup_move" = yes ]; then
+            tar --force-local -c -z -f "$archivedir"/base/oldwals-$(timestamp).tar.gz $old_files
+        fi
+        rm -f $old_files
+        )
     fi
 }
 
