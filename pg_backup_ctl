@@ -53,7 +53,7 @@ done
 
 export PGDATABASE=postgres
 
-mode=$1; shift
+mode=$1; shift || :
 
 
 error() {
@@ -152,10 +152,13 @@ do_currentbackup() {
 do_basebackup() {
     check_dirs
 
+    local status=0
+
     local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar --force-local -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || [ $? -eq 1 ]
+    tar --force-local -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || status=$?
     psql -c "SELECT pg_stop_backup();" >/dev/null
+    [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
 
