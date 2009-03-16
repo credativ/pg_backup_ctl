@@ -29,9 +29,31 @@ archive_command to the shell command done to do the setup.
 
 2. Do a base backup.
 
+2.1 Filebased base backup
+
 A base backup is a tarball (or some other copy) of the data area taken
 from the file system while the system is in special backup mode.  (No
 file system snapshot functionality is required for this.)
+
+2.2
+
+Since release 1.1 pg_backup_ctl supports base backups using LVM snapshots.
+This is done by the new lvmbasebackup command. This requires the -M, -N, -n and
+-L arguments to pg_backup_ctl. For example, to perform a base backup using
+the LVM snapshot pg_backup on the logical volume /dev/backup/pg_backup with
+a snapshot size of 5GB, you can do:
+
+./pg_backup_ctl -A /backup/archive/ -D /var/lib/postgresql/ \ 
+-M /dev/backup/pg_backup -n pg_backup -L 5G -N postgresql lvmbasebackup
+
+Please note the -N parameter. This specifies the data directory of your 
+PostgreSQL cluster relatively to the mounted LVM snapshot. pg_backup_ctl
+will use the directory /backup/archive/lvm_snapshot as the mount directory.
+Since pg_backup_ctl runs as user postgres in normal environments, you want
+to add sudo execution privileges for postgres to the following commands:
+
+- lvcreate, lvremove, lvdisplay
+- mount, umount
 
 3. Save the current log segment.
 

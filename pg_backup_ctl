@@ -16,17 +16,26 @@ Usage:
 Modes:
   setup          prepare server for transaction log archival
   basebackup     perform a base backup
+  lvmbasebackup  perform a base backup using LVM snapshot
+                 (requires -L, -n and -M)
   currentbackup  backup the current WAL file (run from cron job)
   cleanup        remove old WAL files after new base backup (run from cron job)
 
 Options:
-  -A DIR       archival target directory (required)
-  -D DIR       database system directory (recommended)
-  -h HOSTNAME  server host name
-  -m           archive old log files before deleting them
-  -p PORT      server port
-  -U USERNAME  user name for database connections
-  -z           use gzip to compress archived WAL segments
+  -A DIR        archival target directory (required)
+  -D DIR        database system directory (recommended)
+  -h HOSTNAME   server host name
+  -L LVM SIZE   determines the buffer size for a LVM snapshot
+  -M VOLUME     LVM volume identifier to create the snapshot on
+  -m            archive old log files before deleting them
+  -n SNAPSHOT   LVM snapshot volume name
+  -N LVMDATADIR Taking LVM snapshot is done by mounting
+                a LVM snapshot in ARCHIVE/lvm_snapshot. You need
+                to specify the PostgreSQL DATADIR relative to
+                the mountpoint in ARCHIVE/lvm_snapshot
+  -p PORT       server port
+  -U USERNAME   user name for database connections
+  -z            use gzip to compress archived WAL segments
 "
 
 if [ "$1" = "--help" ]; then
@@ -35,14 +44,19 @@ if [ "$1" = "--help" ]; then
 fi
 
 
-set -- $(getopt A:D:h:mp:U:z "$@")
+set -- $(getopt A:D:h:L:M:mn:N:p:U:z "$@")
 
 while :; do
     case $1 in
         -A) archivedir=$2; shift;;
         -D) datadir=$2; shift;;
         -h) export PGHOST=$2; shift;;
+	-L) lvm_size=$2; shift;;
+	-n) lvm_snap_name=$2; shift;;
+	-M) lvm_vol=$2; shift;;
         -m) cleanup_move=yes;;
+	-n) lvm_snap_name=$2; shift;;
+	-N) lvmdatadir=$2; shift;;
         -p) export PGPORT=$2; shift;;
         -U) export PGUSER=$2; shift;;
         -z) gzip=yes;;
@@ -90,7 +104,7 @@ check_dirs() {
 
     local x
 
-    for x in "$archivedir"/{base,log,current}; do
+    for x in "$archivedir"/{base,log,current,lvm_snapshot}; do
         if [ ! -d "$x" ]; then
             mkdir -p "$x"
             chown --reference="$datadir" "$x"
@@ -98,6 +112,31 @@ check_dirs() {
     done
 }
 
+check_lvm_params() {
+
+	## check LVM parameters
+
+	if [ -z "$lvm_size" ]; then
+		error "no LVM snapshot size (-L) specified" 
+	fi
+	
+	## specified volume exists?
+	if [ -z "$lvm_vol" ]; then
+		error "no LVM volume specified"
+        else
+		local RC=$(sudo /sbin/lvdisplay -c /dev/pgvol/database | awk -F ':' '{print $4;}')
+		[ "$RC" -ne 1 ] && error "$lvm_vol is not a valid LVM volume"
+	fi
+
+	if [ -z "$lvm_snap_name" ]; then
+		error "no LVM backup name (-n) specified"
+	fi
+
+	if [ -z "$lvmdatadir" ]; then
+		error "LVM snapshots requires the datadir relative to $archivedir/lvm_snapshot"
+	fi
+
+}
 
 do_setup() {
     check_dirs
@@ -161,6 +200,32 @@ do_basebackup() {
     [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
+do_lvmbasebackup() {
+    check_dirs
+    check_lvm_params
+
+    local status=0
+
+    local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
+    psql -c "SELECT pg_start_backup('$fn');" >/dev/null
+    sudo lvcreate -s -n "$lvm_snap_name" -L "$lvm_size" "$lvm_vol" || status=$? 
+    psql -c "SELECT pg_stop_backup();" >/dev/null
+    [ $status -ne 0 ] && echo "LVM snapshot failed with status $status" && return $status
+
+    ## mount the snapshot in the archive directory LVM snaphost mountpoint
+    sudo /bin/mount $lvm_vol "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
+
+    ## do the backup, fall through all errors!
+    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || status=$?   
+
+    ## unmount the snapshot
+    sudo /bin/umount "$archivedir"/lvm_snapshot
+    local LVMREMOVE=$(sudo /sbin/lvdisplay -c | grep \/dev/[a-zA-Z]*\/$lvm_snap_name | awk -F':' '{print $1;}')
+    echo "removing LVM snapshot $LVMREMOVE"
+    sudo /sbin/lvremove -f -t $LVMREMOVE && sudo /sbin/lvremove -f $LVMREMOVE || status=$?
+    [ $status -eq 0 ] || [ $status -eq 1 ]
+
+}
 
 start_wal_location() { 
     sed -n -r '/^START WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
@@ -226,6 +291,8 @@ case $mode in
         do_currentbackup;;
     basebackup)
         do_basebackup;;
+    lvmbasebackup)
+	do_lvmbasebackup;;
     cleanup)
         do_cleanup "$@";;
     *)
