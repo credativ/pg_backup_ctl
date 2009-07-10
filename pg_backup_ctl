@@ -124,8 +124,14 @@ check_lvm_params() {
 	if [ -z "$lvm_vol" ]; then
 		error "no LVM volume specified"
         else
-		local RC=$(sudo /sbin/lvdisplay -c /dev/pgvol/database | awk -F ':' '{print $4;}')
-		[ "$RC" -ne 1 ] && error "$lvm_vol is not a valid LVM volume"
+                if ! sudo /sbin/lvdisplay $lvm_vol > /dev/null 2>&1; then
+                    error "logical volume \"$lvm_vol\" not found"
+                else
+		    local RC=$(sudo /sbin/lvdisplay -c $lvm_vol | awk -F ':' '{print $4;}')
+		    if [ "$RC" -ne 1 ]; then 
+                        error "\"$lvm_vol\" is not a valid LVM volume"
+                    fi
+                fi
 	fi
 
 	if [ -z "$lvm_snap_name" ]; then
@@ -213,16 +219,16 @@ do_lvmbasebackup() {
     [ $status -ne 0 ] && echo "LVM snapshot failed with status $status" && return $status
 
     ## mount the snapshot in the archive directory LVM snaphost mountpoint
-    sudo /bin/mount $lvm_vol "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
+    local LVMSNAPSHOTMNT="$(dirname $lvm_vol)/$lvm_snap_name"
+    sudo /bin/mount $LVMSNAPSHOTMNT "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
 
     ## do the backup, fall through all errors!
     tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || status=$?   
 
     ## unmount the snapshot
     sudo /bin/umount "$archivedir"/lvm_snapshot
-    local LVMREMOVE=$(sudo /sbin/lvdisplay -c | grep \/dev/[a-zA-Z]*\/$lvm_snap_name | awk -F':' '{print $1;}')
-    echo "removing LVM snapshot $LVMREMOVE"
-    sudo /sbin/lvremove -f -t $LVMREMOVE && sudo /sbin/lvremove -f $LVMREMOVE || status=$?
+    echo "removing LVM snapshot $LVMSNAPSHOTMNT"
+    sudo /sbin/lvremove -f -t $LVMSNAPSHOTMNT > /dev/null 2>&1 && sudo /sbin/lvremove -f $LVMSNAPSHOTMNT 1> /dev/null || status=$?
     [ $status -eq 0 ] || [ $status -eq 1 ]
 
 }
