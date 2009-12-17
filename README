@@ -5,7 +5,7 @@ Setting up and managing this type of backup is rather complicated.  We
 provide you with a script to make many things easier, but
 understanding of the process is still desirable.  Please bookmark and
 read the documentation at
-<http://www.postgresql.org/docs/8.0/static/backup-online.html>.
+<http://www.postgresql.org/docs/8.3/static/backup-online.html>.
 
 This scripts supports PostgreSQL 8.3 and above.
 
