@@ -9,6 +9,7 @@ me=$(basename $0)
 
 help="\
 PostgreSQL transaction log archival backup control program
+Supports PostgreSQL 8.3 and above
 
 Usage:
   $me MODE [OPTION...]

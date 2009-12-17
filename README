@@ -7,6 +7,7 @@ understanding of the process is still desirable.  Please bookmark and
 read the documentation at
 <http://www.postgresql.org/docs/8.0/static/backup-online.html>.
 
+This scripts supports PostgreSQL 8.3 and above.
 
 Theory
 ------
@@ -97,7 +98,9 @@ log/ -- backup of the completed log segments
 pg_backup_ctl -A /var/lib/pgsql/backup setup
 
 This adjusts the server configuration file as required and reloads the
-server configuration.  After a while (assuming there is database
+server configuration.  However, since PostgreSQL 8.3 the script needs to set
+the archive_mode explicitely to on, forcing the administrator to restart the
+PostgreSQL instance (if required). After a restart (assuming there is database
 activity), you should be seeing files appearing in
 /var/lib/pgsql/backup/log.
 
