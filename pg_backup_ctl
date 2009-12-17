@@ -165,6 +165,21 @@ do_setup() {
         (echo; echo "# automatically added by $me"; echo "archive_command = '$cmd'") >>$cf
     fi
 
+    ## Activate archiving. This requires a server restart if not yet set. Hint the
+    ## user, if we changed anything here.
+    local archivemode=$(current_setting archive_mode)
+
+    if grep -q archive_mode "$cf"; then
+        if [ ! -z "$archivemode" ] && [ "$archivemode" = "off" ]; then
+            sed -i -e '/archive_mode/ c\' -e "archive_mode = on" "$cf";
+            echo "HINT: activated archive_mode, you need to restart the server to get archiving activated"
+        else
+            echo "HINT: archive_mode already activated, adjusted archive_command only"
+        fi
+    else
+        (echo; echo "# automatically added by $me"; echo "archive_mode = on") >>$cf        
+    fi
+
     kill -HUP $(head -1 "$datadir/postmaster.pid")
 }
 
