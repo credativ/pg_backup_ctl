@@ -305,6 +305,19 @@ do_cleanup() {
     fi
 }
 
+do_ls() {
+    check_dirs
+    backups=$(ls -t "$archivedir/base")
+    
+    printf "%-51s\t%-29s\t%-2s\n" "Basebackup Filename" "Required WAL" "Available"
+
+    for x in $backups; do
+        first_wal=$(gunzip -c -f "$archivedir/base/$x" | tar -f - -x --force-local -O ./backup_label | start_wal_location)        
+        local wal_avail='YES'
+        test -f "$archivedir/log/$first_wal" || export wal_avail='NO'
+        printf "%-51s\t%-29s\t%-2s\n" "$x" $first_wal $wal_avail
+    done
+}
 
 case $mode in
     setup)
@@ -315,6 +328,8 @@ case $mode in
         do_basebackup;;
     lvmbasebackup)
 	do_lvmbasebackup;;
+    ls)
+        do_ls;;
     cleanup)
         do_cleanup "$@";;
     *)
