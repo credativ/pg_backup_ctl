@@ -21,6 +21,9 @@ Modes:
                  (requires -L, -n and -M)
   currentbackup  backup the current WAL file (run from cron job)
   cleanup        remove old WAL files after new base backup (run from cron job)
+  ls[+]          Lists available base backups from archive. When issued with +, 
+                 the ls command will show the size of the backup piece in the
+                 archive, too.
 
 Options:
   -A DIR        archival target directory (required)
@@ -309,13 +312,22 @@ do_ls() {
     check_dirs
     backups=$(ls -t "$archivedir/base")
     
-    printf "%-51s\t%-29s\t%-2s\n" "Basebackup Filename" "Required WAL" "Available"
+    if [ -z "$1" ]; then
+        printf "%-51s\t%-29s\t%-2s\n" "Basebackup Filename" "Required WAL" "Available"
+    else
+        printf "%-42s\t%-9s\t%-29s\t%-2s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
+    fi
 
     for x in $backups; do
         first_wal=$(gunzip -c -f "$archivedir/base/$x" | tar -f - -x --force-local -O ./backup_label | start_wal_location)        
         local wal_avail='YES'
         test -f "$archivedir/log/$first_wal" || export wal_avail='NO'
-        printf "%-51s\t%-29s\t%-2s\n" "$x" $first_wal $wal_avail
+        if [ -z "$1" ]; then
+            printf "%-51s\t%-29s\t%-2s\n" "$x" $first_wal $wal_avail
+        else
+            basesize=$(du -sh "$archivedir/base/$x")
+            printf "%-42s\t%-9s\t%-29s\t%-2s\n" "$x" $basesize $first_wal $wal_avail
+        fi
     done
 }
 
@@ -330,6 +342,8 @@ case $mode in
 	do_lvmbasebackup;;
     ls)
         do_ls;;
+    ls+)
+        do_ls '+';;
     cleanup)
         do_cleanup "$@";;
     *)
