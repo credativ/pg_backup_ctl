@@ -22,9 +22,10 @@ Modes:
                  (requires -L, -n and -M)
   currentbackup  backup the current WAL file (run from cron job)
   cleanup        remove old WAL files after new base backup (run from cron job)
-  ls[+]          Lists available base backups from archive. When issued with +, 
-                 the ls command will show the size of the backup piece in the
-                 archive, too.
+  ls[+]          Lists available base backups and their size in the current archive. 
+                 When issued with +, the ls command will examine the WAL archive
+                 and the minimum WAL segment file, required to use the backup 
+                 to perform a full recovery.
 
 Options:
   -A DIR        archival target directory (required)
