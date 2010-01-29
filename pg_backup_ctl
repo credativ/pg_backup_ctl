@@ -6,6 +6,7 @@ umask 077
 export LC_COLLATE=C
 
 me=$(basename $0)
+hdrline=$(printf "%080d"|tr "0" "-")
 
 help="\
 PostgreSQL transaction log archival backup control program
@@ -313,22 +314,32 @@ do_ls() {
     backups=$(ls -t "$archivedir/base")
     
     if [ -z "$1" ]; then
-        printf "%-51s\t%-29s\t%-2s\n" "Basebackup Filename" "Required WAL" "Available"
+        printf "%-71s\t%-9s\n" "Basebackup Filename" "Size"
     else
-        printf "%-42s\t%-9s\t%-29s\t%-2s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
+        printf "%-53s\t%s\t%-24s\t%-3s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
     fi
 
+    echo $hdrline
+
     for x in $backups; do
-        first_wal=$(gunzip -c -f "$archivedir/base/$x" | tar -f - -x --force-local -O ./backup_label | start_wal_location)        
-        local wal_avail='YES'
-        test -f "$archivedir/log/$first_wal" || export wal_avail='NO'
+
+        basesize=$(du -sh "$archivedir/base/$x" | awk '{print $1;}')
+
         if [ -z "$1" ]; then
-            printf "%-51s\t%-29s\t%-2s\n" "$x" $first_wal $wal_avail
-        else
-            basesize=$(du -sh "$archivedir/base/$x")
-            printf "%-42s\t%-9s\t%-29s\t%-2s\n" "$x" $basesize $first_wal $wal_avail
+            printf "%-71s\t%-9s\n" "$x" $basesize
+        elif [ "$1" = "+" ]; then
+            first_wal=$(gunzip -c -f "$archivedir/base/$x" | tar -f - -x --force-local -O ./backup_label | start_wal_location)
+            local wal_avail='YES'
+            test -f "$archivedir/log/$first_wal" || export wal_avail='NO'
+            printf "%-53s\t%s\t%-24s\t%-3s\n" "$x" $basesize $first_wal $wal_avail
         fi
     done
+
+    ## sum up archive log size
+    wallogsize=$(du -sh "$archivedir/log" | awk '{print $1;}')
+    walcount=$(ls -1 "$archivedir/log/" | egrep '^[0-9A-Z]{24}$' | wc -l)
+    echo $hdrline
+    printf "Total size occupied by %d WAL segments in archive: %-9s\n" $walcount $wallogsize
 }
 
 case $mode in
