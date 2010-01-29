@@ -8,6 +8,10 @@ export LC_COLLATE=C
 me=$(basename $0)
 hdrline=$(printf "%080d"|tr "0" "-")
 
+## configure locking behavior
+LOCK=/var/lock/pg_backup_ctl.base.lock
+PG_BACKUP_LOCK_TIMEOUT=60
+
 help="\
 PostgreSQL transaction log archival backup control program
 Supports PostgreSQL 8.3 and above
@@ -48,7 +52,6 @@ if [ "$1" = "--help" ]; then
     echo "$help"
     exit 0
 fi
-
 
 set -- $(getopt A:D:h:L:M:mn:N:p:U:z "$@")
 
@@ -347,17 +350,40 @@ case $mode in
     setup)
         do_setup;;
     currentbackup)
-        do_currentbackup;;
+        ( 
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+            do_currentbackup
+        ) 284>$LOCK
+        ;;
     basebackup)
-        do_basebackup;;
+        ( 
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+            do_basebackup
+        ) 284>$LOCK
+        ;;
     lvmbasebackup)
-	do_lvmbasebackup;;
+        ( 
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+	    do_lvmbasebackup
+        ) 284>$LOCK
+        ;;
     ls)
-        do_ls;;
+        ## ls command without any arguments accesses the 
+        ## filesystem only, thus no lock required
+        do_ls
+        ;;
     ls+)
-        do_ls '+';;
+        ( 
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+            do_ls '+'
+        ) 284>$LOCK
+        ;;
     cleanup)
-        do_cleanup "$@";;
+        ( 
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+            do_cleanup "$@"
+        ) 284>$LOCK
+        ;;
     *)
         error "invalid mode";;
 esac
