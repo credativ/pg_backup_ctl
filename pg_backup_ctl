@@ -315,6 +315,9 @@ do_cleanup() {
 
 do_ls() {
     check_dirs
+
+    local backups basesize wallogsize walcount
+
     backups=$(ls -t "$archivedir/base")
     
     if [ -z "$1" ]; then
