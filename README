@@ -178,7 +178,7 @@ incident that you want to recover from.
 7. Create a file recovery.conf in the new data directory with the
 following contents:
 
-recovery_command = 'cp /var/lib/pgsql/backup/log/%f "%p"'
+restore_command = 'cp /var/lib/pgsql/backup/log/%f "%p"'
 
 Other possible settings to do point-in-time recovery (as opposed to
 recovering to the very end of the log, as we're doing now) are
