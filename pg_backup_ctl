@@ -89,12 +89,17 @@ current_setting() {
     psql -tA -c "SELECT current_setting('$1');"
 }
 
-
 timestamp() {
     # A detailed timestamp is good to uniquely identify a backup.
     date +'%Y-%m-%dT%H:%M:%S.%N%:z'
 }
 
+check_deps() {
+	# check if needed programs are there
+	if ! command -v rsync; then
+		error "cannot find rsync command"
+	fi;
+}
 
 check_dirs() {
     # Especially when calling currentbackup, specifying a data directory
@@ -154,7 +159,6 @@ check_lvm_params() {
 }
 
 do_setup() {
-    check_dirs
 
     if [ $(ls "$datadir"/pg_tblspc | wc -l) -gt 0 ]; then
         error "tablespaces not supported"
@@ -194,7 +198,6 @@ do_setup() {
 
 
 do_currentbackup() {
-    check_dirs
 
     local files x y
 
@@ -219,7 +222,6 @@ do_currentbackup() {
 
 
 do_basebackup() {
-    check_dirs
 
     local status=0
 
@@ -231,7 +233,6 @@ do_basebackup() {
 }
 
 do_lvmbasebackup() {
-    check_dirs
     check_lvm_params
 
     local status=0
@@ -314,7 +315,6 @@ do_cleanup() {
 }
 
 do_ls() {
-    check_dirs
 
     local backups basesize wallogsize walcount
 
@@ -348,6 +348,10 @@ do_ls() {
     echo $hdrline
     printf "Total size occupied by %d WAL segments in archive: %-9s\n" $walcount $wallogsize
 }
+
+# check prerequisites
+check_dirs
+check_deps
 
 case $mode in
     setup)
