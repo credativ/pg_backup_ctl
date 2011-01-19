@@ -225,7 +225,7 @@ do_basebackup() {
 
     local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar --force-local -C "$datadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || status=$?
+    tar --force-local -C "$datadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?
     psql -c "SELECT pg_stop_backup();" >/dev/null
     [ $status -eq 0 ] || [ $status -eq 1 ]
 }
@@ -247,7 +247,7 @@ do_lvmbasebackup() {
     sudo /bin/mount $LVMSNAPSHOTMNT "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
 
     ## do the backup, fall through all errors!
-    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --anchored --exclude=pg_xlog . || status=$?   
+    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?   
 
     ## unmount the snapshot
     sudo /bin/umount "$archivedir"/lvm_snapshot
