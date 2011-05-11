@@ -96,7 +96,7 @@ timestamp() {
 
 check_deps() {
 	# check if needed programs are there
-	if ! command -v rsync; then
+	if ! command -v rsync >/dev/null; then
 		error "cannot find rsync command"
 	fi;
 }
