@@ -25,7 +25,18 @@ Modes:
   lvmbasebackup  perform a base backup using LVM snapshot
                  (requires -L, -n and -M)
   currentbackup  backup the current WAL file (run from cron job)
-  cleanup        remove old WAL files after new base backup (run from cron job)
+  cleanup [ FILENAME | XLOG | +[1-9]* ]       
+                 remove old WAL files after new base backup (run from cron job)
+
+                 It is possible to specify the base backup filename FILENAME, 
+                 which WAL files should be kept at least or the WAL file XLOG.
+                 If a positiv number greater than zero is specified, the cleanup
+                 command will treat it as its retention policy and keep at least this
+                 number of base backup files. Please note that the latter form of the 
+                 cleanup command will delete all outdated base backups as well whereas
+                 the two forms of cleanup invoked with filenames will delete the WAL 
+                 files only. If no argument is specified, cleanup will remove all WAL 
+                 files except those which are required by the latest base backup.
   ls[+]          Lists available base backups and their size in the current archive. 
                  When issued with +, the ls command will examine the WAL archive
                  and the minimum WAL segment file, required to use the backup 
@@ -297,6 +308,43 @@ do_cleanup() {
             fi
             first_wal=$(gunzip -c -f "$last_backup" | start_wal_location)
             ;;
+	+[1-9]*)
+	    local retention_policy=$1
+	    local base_backups=$(ls -tr "$archivedir"/base/basebackup_*.tar*)
+	    local num_backups=$(echo "$base_backups" | wc -l)
+
+	    if [ $num_backups -le $retention_policy ]; then
+		echo "no base backups to delete found"
+		return 1
+	    else
+		local candidates
+		local newest_candidate
+
+		candidates=$(echo "$base_backups" | head -n $(($num_backups - $retention_policy)))
+		oldest_keep=$(echo "$base_backups" | head -n $(($num_backups - $retention_policy + 1)) | tail -n1)
+		newest_candidate=$(echo "$candidates" | tail -n1)
+
+		## This recurses into cleanup and removes all WAL files
+		## belonging to the list of candidates. Those aren't required
+		## anymore, since we are going to delete base backup candidates
+		## afterwards.
+		## NOTE: 
+		##
+		## We need to specify the oldest base backup to *keep*, since
+		## do_cleanup() will keep all WAL files belonging to the specified
+		## base backup.
+		do_cleanup $oldest_keep
+		
+		for i in $candidates; do
+		    rm "$i"
+		done
+	    fi
+
+	    ## exit immediately after cleaning base backups. We *must* return
+	    ## to the caller, otherwise do_cleanup() will proceed and delete all WAL
+	    ## files older than the current base backup.
+	    return 0
+	    ;;
         *)
             error "invalid cleanup target specification"
             ;;
