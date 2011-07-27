@@ -114,6 +114,21 @@ check_deps() {
 	fi;
 }
 
+##
+## Returns the PostgreSQL major version of the specified PGDATA directory
+## as an integer. That is, the first two digits are concatenated to a unified
+## number so it can be compared arithmetically (e.g. 9.0.4 will be returned 
+## as 90).
+##
+## Caller should make sure PGDATA really exists
+##
+get_pg_major_version() {
+
+    local PGMAJOR=$(cat "$datadir"/PG_VERSION | awk -F'.' '{print $1$2;}')
+    echo $PGMAJOR
+
+}
+
 check_dirs() {
     # Especially when calling currentbackup, specifying a data directory
     # directly is advisable to avoid frequent database connections.
@@ -134,7 +149,6 @@ check_dirs() {
     for x in "$archivedir"/{base,log,current,lvm_snapshot}; do
         if [ ! -d "$x" ]; then
             mkdir -p "$x"
-            chown --reference="$datadir" "$x"
         fi
     done
 
@@ -192,7 +206,9 @@ do_setup() {
     local cf=$(current_setting config_file)
 
     if grep -q archive_command "$cf"; then
-        sed -i -e '/archive_command/ c\' -e "archive_command = '$cmd'" "$cf"
+        sed -i -e "/archive_command/ c\\
+                   archive_command = '$cmd'
+                   a\\" "$cf"
     else
         (echo; echo "# automatically added by $me"; echo "archive_command = '$cmd'") >>$cf
     fi
@@ -203,13 +219,36 @@ do_setup() {
 
     if grep -q archive_mode "$cf"; then
         if [ ! -z "$archivemode" ] && [ "$archivemode" = "off" ]; then
-            sed -i -e '/archive_mode/ c\' -e "archive_mode = on" "$cf";
+            sed -i -e '/archive_mode/ c\
+                       archive_mode = on
+                       a\' "$cf"
             echo "HINT: activated archive_mode, you need to restart the server to get archiving activated"
         else
             echo "HINT: archive_mode already activated, adjusted archive_command only"
         fi
     else
         (echo; echo "# automatically added by $me"; echo "archive_mode = on") >>$cf        
+    fi
+
+    ## Starting with PostgreSQL 9.0, we define different wal levels to adjust the traffic into
+    ## the transaction log. For archiving, we need at least wal_level = archive to be set, otherwise
+    ## PostgreSQL will refuse to start.
+
+    if [ $(get_pg_major_version) -ge 90 ]; then
+        local wallevel=$(current_setting wal_level)
+
+        if grep -q wal_level "$cf"; then
+            if [ ! -z "$wallevel" ] && [ "$wallevel" != "archive" ] && [ "$wallevel" != "hot_standby" ]; then
+                sed -i -e '/wal_level/ c\
+                           wal_level = archive
+                           a\' "$cf"
+                echo "HINT: set wal_level to 'archive', you need to restart the server to get this setting into effect"
+            else
+                echo "HINT: wal_level already set to 'archive'"
+            fi
+        else
+            (echo; echo "# automatically added by $me"; echo "wal_level = archive") >>$cf        
+        fi
     fi
 
     kill -HUP $(head -1 "$datadir/postmaster.pid")
