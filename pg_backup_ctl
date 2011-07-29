@@ -438,7 +438,7 @@ do_ls() {
     done
 
     ## sum up archive log size
-    wallogsize=$(du -sh "$archivedir/log" | awk '{print $1;}')
+    wallogsize=$(du -sh "$archivedir/log/" | awk '{print $1;}')
     walcount=$(ls -1 "$archivedir/log/" | egrep '^[0-9A-Z]{24}\.?[gz]*$' | wc -l)
     echo $hdrline
     printf "Total size occupied by %d WAL segments in archive: %-9s\n" $walcount $wallogsize
