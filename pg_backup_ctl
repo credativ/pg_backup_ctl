@@ -22,24 +22,38 @@ Usage:
   $me MODE [OPTION...]
 
 Modes:
-  setup          prepare server for transaction log archival
-  basebackup     perform a base backup
-  lvmbasebackup  perform a base backup using LVM snapshot
+  setup          
+                 prepare server for transaction log archival
+  basebackup     
+                 perform a base backup
+  lvmbasebackup  
+                 perform a base backup using LVM snapshot
                  (requires -L, -n and -M)
-  currentbackup  backup the current WAL file (run from cron job)
+  create-lvmsnapshot
+                 create a LVM snapshot for an external backup command
+                 (requires -L, -n and -M)
+  remove-lvmsnapshot
+                 remove a LVM snapshot created with the create-lvmsnapshot
+                 command.
+  currentbackup  
+                 backup the current WAL file (run from cron job)
   cleanup [ FILENAME | XLOG | +[1-9]* ]       
                  remove old WAL files after new base backup (run from cron job)
 
-                 It is possible to specify the base backup filename FILENAME, 
+                 It is possible to specify the base backup filename FILENAME,
                  which WAL files should be kept at least or the WAL file XLOG.
                  If a positiv number greater than zero is specified, the cleanup
-                 command will treat it as its retention policy and keep at least this
-                 number of base backup files. Please note that the latter form of the 
-                 cleanup command will delete all outdated base backups as well whereas
-                 the two forms of cleanup invoked with filenames will delete the WAL 
-                 files only. If no argument is specified, cleanup will remove all WAL 
-                 files except those which are required by the latest base backup.
-  ls[+]          Lists available base backups and their size in the current archive. 
+                 command will treat it as its retention policy and keep at
+                 least this number of base backup files. Please note that the
+                 latter form of the cleanup command will delete all outdated
+                 base backups as well whereas the two forms of cleanup invoked
+                 with filenames will delete the WAL files only. 
+
+                 If no argument is specified, cleanup will remove all WAL 
+                 files except those which are required by the latest base
+                 backup.
+  ls[+]          
+                 Lists available base backups and their size in the current archive. 
                  When issued with +, the ls command will examine the WAL archive
                  and the minimum WAL segment file, required to use the backup 
                  to perform a full recovery.
@@ -56,6 +70,8 @@ Options:
                 a LVM snapshot in ARCHIVE/lvm_snapshot. You need
                 to specify the PostgreSQL DATADIR relative to
                 the mountpoint in ARCHIVE/lvm_snapshot
+  -o MOUNTOPTS  additional options passed to snapshot mount if used
+                with LVM snapshots
   -p PORT       server port
   -U USERNAME   user name for database connections
   -z            use gzip to compress archived WAL segments
@@ -66,7 +82,7 @@ if [ "$1" = "--help" ]; then
     exit 0
 fi
 
-set -- $(getopt A:D:h:L:M:mn:N:p:U:z "$@")
+set -- $(getopt A:D:h:L:M:mn:N:o:p:U:z "$@")
 
 while :; do
     case $1 in
@@ -79,6 +95,7 @@ while :; do
         -m) cleanup_move=yes;;
 	-n) lvm_snap_name=$2; shift;;
 	-N) lvmdatadir=$2; shift;;
+        -o) mountopts=$2; shift;;
         -p) export PGPORT=$2; shift;;
         -U) export PGUSER=$2; shift;;
         -z) gzip=yes;;
@@ -189,6 +206,9 @@ check_lvm_params() {
 		error "LVM snapshots requires the datadir relative to $archivedir/lvm_snapshot"
 	fi
 
+        if [ ! -z "$mountopts" ]; then
+            mountopts="-o $mountopts"
+        fi
 }
 
 do_setup() {
@@ -290,30 +310,73 @@ do_basebackup() {
     [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
+_create_snapshot_LVM() {
+
+    local status=0
+    local fn="$1"
+
+    psql -c "SELECT pg_start_backup('LVM SNAPSHOT $(timestamp)');" >/dev/null
+    sudo lvcreate -s -n "$lvm_snap_name" -L "$lvm_size" "$lvm_vol" || status=$?
+ 
+    psql -c "SELECT pg_stop_backup();" >/dev/null
+    [ $status -ne 0 ] && echo "LVM snapshot failed with status $status" && return $status
+
+    ## mount the snapshot in the archive directory LVM snaphost mountpoint                                                            
+    local LVMSNAPSHOTMNT="$(dirname $lvm_vol)/$lvm_snap_name"
+    sudo /bin/mount $mountopts $LVMSNAPSHOTMNT "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
+
+}
+
+_remove_snapshot_LVM() {
+
+    local status=0
+    local LVMSNAPSHOTMNT="$(dirname $lvm_vol)/$lvm_snap_name"
+
+    ## unmount the snapshot
+    sudo /bin/umount "$archivedir"/lvm_snapshot
+    echo "removing LVM snapshot $LVMSNAPSHOTMNT"
+    sudo /sbin/lvremove -f -t $LVMSNAPSHOTMNT > /dev/null 2>&1 && sudo /sbin/lvremove -f $LVMSNAPSHOTMNT 1> /dev/null || status=$?
+
+    return $status
+}
+
+do_create-lvmsnapshot() {
+    check_lvm_params
+
+    local status=0
+    local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
+
+    ## do the backup, fall through all errors!
+    if _create_snapshot_LVM "$fn"; then
+        tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir/" -c -z -f "$fn" ./backup_label || status=$?
+    fi
+
+    [ $status -eq 0 ] || [ $status -eq 1 ]
+}
+
+do_remove-lvmsnapshot() {
+    local status=0
+
+    _remove_snapshot_LVM || status=$?
+
+    [ $status -eq 0 ] || [ $status -eq 1 ]
+}
+
 do_lvmbasebackup() {
     check_lvm_params
 
     local status=0
 
     local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
-    psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    sudo lvcreate -s -n "$lvm_snap_name" -L "$lvm_size" "$lvm_vol" || status=$? 
-    psql -c "SELECT pg_stop_backup();" >/dev/null
-    [ $status -ne 0 ] && echo "LVM snapshot failed with status $status" && return $status
-
-    ## mount the snapshot in the archive directory LVM snaphost mountpoint
-    local LVMSNAPSHOTMNT="$(dirname $lvm_vol)/$lvm_snap_name"
-    sudo /bin/mount $LVMSNAPSHOTMNT "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
+    _create_snapshot_LVM "$fn"
 
     ## do the backup, fall through all errors!
     tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?   
 
     ## unmount the snapshot
-    sudo /bin/umount "$archivedir"/lvm_snapshot
-    echo "removing LVM snapshot $LVMSNAPSHOTMNT"
-    sudo /sbin/lvremove -f -t $LVMSNAPSHOTMNT > /dev/null 2>&1 && sudo /sbin/lvremove -f $LVMSNAPSHOTMNT 1> /dev/null || status=$?
-    [ $status -eq 0 ] || [ $status -eq 1 ]
+    _remove_snapshot_LVM || status=$?
 
+    [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
 start_wal_location() { 
@@ -380,6 +443,11 @@ do_cleanup() {
 		## We need to specify the oldest base backup to *keep*, since
 		## do_cleanup() will keep all WAL files belonging to the specified
 		## base backup.
+                ##
+                ## XXX: Currently we are performing the cleanup based on selecting
+                ##      the base backup files from $archivedir/base. In the
+                ##      future, we might change this code to select the base
+                ##      backups according to the backup history files found there.
 		do_cleanup $oldest_keep
 		
 		for i in $candidates; do
@@ -467,6 +535,18 @@ case $mode in
         ( 
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
 	    do_lvmbasebackup
+        ) 284>$LOCK
+        ;;
+    create-lvmsnapshot)
+        ( 
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+	    do_create-lvmsnapshot
+        ) 284>$LOCK
+        ;;
+    remove-lvmsnapshot)
+        ( 
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+	    do_remove-lvmsnapshot
         ) 284>$LOCK
         ;;
     ls)
