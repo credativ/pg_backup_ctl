@@ -121,7 +121,7 @@ current_setting() {
 
 timestamp() {
     # A detailed timestamp is good to uniquely identify a backup.
-    date +'%Y-%m-%dT%H:%M:%S.%N%:z'
+    date +'%Y-%m-%dT%H:%M'
 }
 
 check_deps() {
@@ -477,11 +477,15 @@ do_cleanup() {
     fi
 }
 
+backup_label() {
+    sed -n -e '/^LABEL:/s/^LABEL://;s/^\s//p'
+}
+
 do_ls() {
 
     local backups basesize wallogsize walcount
 
-    backups=$(ls -t "$archivedir/base")
+    backups=$(ls -t $archivedir/log/[0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup* 2> /dev/null || return 0)
     
     if [ -z "$1" ]; then
         printf "%-71s\t%-9s\n" "Basebackup Filename" "Size"
@@ -493,15 +497,34 @@ do_ls() {
 
     for x in $backups; do
 
-        basesize=$(du -sh "$archivedir/base/$x" | awk '{print $1;}')
+        local fn=$(basename "$(cat "$x" | gunzip -f -c | backup_label)")
+
+        case $fn in
+
+            basebackup_*.tar.gz)
+                fn="$(basename $fn)"
+                basesize=$(du -sh "$archivedir/base/$fn" | awk '{print $1;}')
+                ;;
+            *SNAPSHOT*)
+                basesize=0
+                ;;
+            *)
+                echo "\"$fn\" is not an expected basebackup filename"
+                ;;
+
+        esac
 
         if [ -z "$1" ]; then
-            printf "%-71s\t%-9s\n" "$x" $basesize
+            printf "%-71s\t%-9s\n" "$fn" $basesize
         elif [ "$1" = "+" ]; then
-            first_wal=$(gunzip -c -f "$archivedir/base/$x" | tar -f - -x --force-local -O ./backup_label | start_wal_location)
+
             local wal_avail='YES'
+
+            ## XXX: a backup history file might be compressed, too
+            first_wal=$(cat "$x" | gunzip -c -f | start_wal_location)
+
             (test -f "$archivedir/log/$first_wal" || test -f "$archivedir/log/$first_wal.gz") || export wal_avail='NO'
-            printf "%-53s\t%s\t%-24s\t%-3s\n" "$x" $basesize $first_wal $wal_avail
+            printf "%-53s\t%s\t%-24s\t%-3s\n" "$fn" $basesize $first_wal $wal_avail
         fi
     done
 
