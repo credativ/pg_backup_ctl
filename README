@@ -56,6 +56,29 @@ to add sudo execution privileges for postgres to the following commands:
 - lvcreate, lvremove, lvdisplay
 - mount, umount
 
+2.3
+
+With release 0.3.x pg_backup_ctl also supports integration with external backup
+software and filesystem snapshots (Linux only).
+
+The normal task to perform such a backup is
+as follows:
+
+- Prepare the database snapshot and LVM snapshot:
+
+$ pg_backup_ctl -A <ARCHIVEDIR> <LVM OPTIONS> lvm-createsnapshot
+
+- Perform the backup with your external backup utility, but CAUTION:
+  The filesystem snapshot is automatically mounted in <ARCHIVEDIR>/lvm_snapshot !
+  NEVER EVER perform the backup from the PGDATA directory directly!
+
+- After finishing the filesystem level backup, remove the LVM snapshot
+  from the system:
+
+$ pg_backup_ctl -A <ARCHIVEDIR> <LVM OPTIONS> remove-lvmsnapshot
+
+We also recommend to implement a monitoring check for failed LVM snapshots.
+
 3. Save the current log segment.
 
 Log segments are only archived when they are full (16 MB).  In case
