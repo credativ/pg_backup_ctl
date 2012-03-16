@@ -310,12 +310,24 @@ do_basebackup() {
     [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
+##
+## Create a LVM snapshot, pass $2 as a backup label
+## to pg_start_backup() if required, overriding the default
+## label "LVM SNAPSHOT YYYY-MM-DDTHH24:MI"
+##
 _create_snapshot_LVM() {
 
     local status=0
     local fn="$1"
+    local label
 
-    psql -c "SELECT pg_start_backup('LVM SNAPSHOT $(timestamp)');" >/dev/null
+    if [ ! -z "$2" ]; then
+        label="$fn"
+    else
+        label="LVM SNAPSHOT $(timestamp)"
+    fi
+
+    psql -c "SELECT pg_start_backup('$label');" >/dev/null
     sudo lvcreate -s -n "$lvm_snap_name" -L "$lvm_size" "$lvm_vol" || status=$?
  
     psql -c "SELECT pg_stop_backup();" >/dev/null
@@ -368,7 +380,7 @@ do_lvmbasebackup() {
     local status=0
 
     local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
-    _create_snapshot_LVM "$fn"
+    _create_snapshot_LVM "$fn" "$fn"
 
     ## do the backup, fall through all errors!
     tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?   
