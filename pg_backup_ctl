@@ -36,7 +36,7 @@ me=$(basename $0)
 hdrline=$(printf "%080d"|tr "0" "-")
 
 ## Specify lock file location and locking timeout. Note
-## that LOCK is overriden by check_dirs() to be in $archivedir instead, 
+## that LOCK is overriden by check_dirs() to be in $archivedir instead,
 ## this is just a fallback setting (which, in fact, isn't currently used).
 LOCK=/var/lock/pg_backup_ctl.base.lock
 PG_BACKUP_LOCK_TIMEOUT=60
@@ -49,11 +49,11 @@ Usage:
   $me MODE [OPTION...]
 
 Modes:
-  setup          
+  setup
                  prepare server for transaction log archival
-  basebackup     
+  basebackup
                  perform a base backup
-  lvmbasebackup  
+  lvmbasebackup
                  perform a base backup using LVM snapshot
                  (requires -L, -n and -M)
   create-lvmsnapshot
@@ -62,9 +62,9 @@ Modes:
   remove-lvmsnapshot
                  remove a LVM snapshot created with the create-lvmsnapshot
                  command.
-  currentbackup  
+  currentbackup
                  backup the current WAL file (run from cron job)
-  cleanup [ FILENAME | XLOG | +[1-9]* ]       
+  cleanup [ FILENAME | XLOG | +[1-9]* ]
                  remove old WAL files after new base backup (run from cron job)
 
                  It is possible to specify the base backup filename FILENAME,
@@ -74,15 +74,15 @@ Modes:
                  least this number of base backup files. Please note that the
                  latter form of the cleanup command will delete all outdated
                  base backups as well whereas the two forms of cleanup invoked
-                 with filenames will delete the WAL files only. 
+                 with filenames will delete the WAL files only.
 
-                 If no argument is specified, cleanup will remove all WAL 
+                 If no argument is specified, cleanup will remove all WAL
                  files except those which are required by the latest base
                  backup.
-  ls[+]          
-                 Lists available base backups and their size in the current archive. 
+  ls[+]
+                 Lists available base backups and their size in the current archive.
                  When issued with +, the ls command will examine the WAL archive
-                 and the minimum WAL segment file, required to use the backup 
+                 and the minimum WAL segment file, required to use the backup
                  to perform a full recovery.
 
 Options:
@@ -161,7 +161,7 @@ check_deps() {
 ##
 ## Returns the PostgreSQL major version of the specified PGDATA directory
 ## as an integer. That is, the first two digits are concatenated to a unified
-## number so it can be compared arithmetically (e.g. 9.0.4 will be returned 
+## number so it can be compared arithmetically (e.g. 9.0.4 will be returned
 ## as 90).
 ##
 ## Caller should make sure PGDATA really exists
@@ -208,9 +208,9 @@ check_lvm_params() {
 	## check LVM parameters
 
 	if [ -z "$lvm_size" ]; then
-		error "no LVM snapshot size (-L) specified" 
+		error "no LVM snapshot size (-L) specified"
 	fi
-	
+
 	## specified volume exists?
 	if [ -z "$lvm_vol" ]; then
 		error "no LVM volume specified"
@@ -219,7 +219,7 @@ check_lvm_params() {
                     error "logical volume \"$lvm_vol\" not found"
                 else
 		    local RC=$(sudo /sbin/lvdisplay -c $lvm_vol | awk -F ':' '{print $4;}')
-		    if [ "$RC" -ne 1 ]; then 
+		    if [ "$RC" -ne 1 ]; then
                         error "\"$lvm_vol\" is not a valid LVM volume"
                     fi
                 fi
@@ -274,7 +274,7 @@ do_setup() {
             echo "HINT: archive_mode already activated, adjusted archive_command only"
         fi
     else
-        (echo; echo "# automatically added by $me"; echo "archive_mode = on") >>$cf        
+        (echo; echo "# automatically added by $me"; echo "archive_mode = on") >>$cf
     fi
 
     ## Starting with PostgreSQL 9.0, we define different wal levels to adjust the traffic into
@@ -294,7 +294,7 @@ do_setup() {
                 echo "HINT: wal_level already set to 'archive'"
             fi
         else
-            (echo; echo "# automatically added by $me"; echo "wal_level = archive") >>$cf        
+            (echo; echo "# automatically added by $me"; echo "wal_level = archive") >>$cf
         fi
     fi
 
@@ -351,21 +351,30 @@ _create_snapshot_LVM() {
     if [ ! -z "$2" ]; then
         label="$fn"
     else
+        ##
+        ## XXX: We obtain a separate timestamp for labeling the LVM snapshot.
+        ##      Do this only in case no backup_label was specified (which,
+        ##      effectively would have generated the label and basebackup
+        ##      filename already).
+        ##
         label="LVM SNAPSHOT $(timestamp)"
     fi
 
     psql -c "SELECT pg_start_backup('$label');" >/dev/null
     sudo lvcreate -s -n "$lvm_snap_name" -L "$lvm_size" "$lvm_vol" || status=$?
- 
+
     psql -c "SELECT pg_stop_backup();" >/dev/null
     [ $status -ne 0 ] && echo "LVM snapshot failed with status $status" && return $status
 
-    ## mount the snapshot in the archive directory LVM snaphost mountpoint                                                            
+    ## mount the snapshot in the archive directory LVM snaphost mountpoint
     local LVMSNAPSHOTMNT="$(dirname $lvm_vol)/$lvm_snap_name"
     sudo /bin/mount $mountopts $LVMSNAPSHOTMNT "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
 
 }
 
+##
+## Remove a LVM snapshot previously created with _create_snapshot_LVM
+##
 _remove_snapshot_LVM() {
 
     local status=0
@@ -379,6 +388,17 @@ _remove_snapshot_LVM() {
     return $status
 }
 
+##
+## Create a LVM snapshot and perform a basebackup via tar.
+##
+## This calls _create_snapshot_LVM() internally, which does
+## the legwork of creating the necessary LVM snapshot and
+## prepares the mount.
+##
+## Please note that do_create-lvmsnapshot never performs a real basebackup,
+## instead it creates an archive file with just the backup_label included. It
+## is up to an external backup software to do the actual base backup.
+##
 do_create-lvmsnapshot() {
     check_lvm_params
 
@@ -393,6 +413,9 @@ do_create-lvmsnapshot() {
     [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
+##
+## Remove a LVM snapshot previously created via _create_snapshot_LVM().
+##
 do_remove-lvmsnapshot() {
     local status=0
 
@@ -401,6 +424,9 @@ do_remove-lvmsnapshot() {
     [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
+##
+## Creates a full basebackup from a LVM snapshot.
+##
 do_lvmbasebackup() {
     check_lvm_params
 
@@ -410,7 +436,7 @@ do_lvmbasebackup() {
     _create_snapshot_LVM "$fn" "$fn"
 
     ## do the backup, fall through all errors!
-    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?   
+    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?
 
     ## unmount the snapshot
     _remove_snapshot_LVM || status=$?
@@ -418,12 +444,12 @@ do_lvmbasebackup() {
     [ $status -eq 0 ] || [ $status -eq 1 ]
 }
 
-start_wal_location() { 
+start_wal_location() {
     sed -n -r '/^START WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
 }
 
 
-stop_wal_location() { 
+stop_wal_location() {
     sed -n -r '/^STOP WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
 }
 
@@ -477,7 +503,7 @@ do_cleanup() {
 		## belonging to the list of candidates. Those aren't required
 		## anymore, since we are going to delete base backup candidates
 		## afterwards.
-		## NOTE: 
+		## NOTE:
 		##
 		## We need to specify the oldest base backup to *keep*, since
 		## do_cleanup() will keep all WAL files belonging to the specified
@@ -488,7 +514,7 @@ do_cleanup() {
                 ##      future, we might change this code to select the base
                 ##      backups according to the backup history files found there.
 		do_cleanup $oldest_keep
-		
+
 		for i in $candidates; do
 		    rm "$i"
 		done
@@ -525,7 +551,7 @@ do_ls() {
     local backups basesize wallogsize walcount
 
     backups=$(ls -t $archivedir/log/[0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup* 2> /dev/null || return 0)
-    
+
     if [ -z "$1" ]; then
         printf "%-71s\t%-9s\n" "Basebackup Filename" "Size"
     else
@@ -582,48 +608,48 @@ case $mode in
     setup)
         do_setup;;
     currentbackup)
-        ( 
+        (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
             do_currentbackup
         ) 284>$LOCK
         ;;
     basebackup)
-        ( 
+        (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
             do_basebackup
         ) 284>$LOCK
         ;;
     lvmbasebackup)
-        ( 
+        (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
 	    do_lvmbasebackup
         ) 284>$LOCK
         ;;
     create-lvmsnapshot)
-        ( 
+        (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
 	    do_create-lvmsnapshot
         ) 284>$LOCK
         ;;
     remove-lvmsnapshot)
-        ( 
+        (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
 	    do_remove-lvmsnapshot
         ) 284>$LOCK
         ;;
     ls)
-        ## ls command without any arguments accesses the 
+        ## ls command without any arguments accesses the
         ## filesystem only, thus no lock required
         do_ls
         ;;
     ls+)
-        ( 
+        (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
             do_ls '+'
         ) 284>$LOCK
         ;;
     cleanup)
-        ( 
+        (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
             do_cleanup "$@"
         ) 284>$LOCK
