@@ -148,7 +148,7 @@ current_setting() {
 
 timestamp() {
     # A detailed timestamp is good to uniquely identify a backup.
-    date +'%Y-%m-%dT%H:%M'
+    date +'%Y-%m-%dT%H%M'
 }
 
 check_deps() {
