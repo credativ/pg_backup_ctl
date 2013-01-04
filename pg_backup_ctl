@@ -62,6 +62,13 @@ Modes:
   remove-lvmsnapshot
                  remove a LVM snapshot created with the create-lvmsnapshot
                  command.
+  restore BASEBACKUP
+                 Restores the specified basebackup into the specified
+                 directory by the -D parameter. 
+                 The directory must already exist and be empty.
+                 The destination directory will also contain a generated
+                 recovery.conf, suitable to start a PostgreSQL instance for
+                 recovery immediately.
   currentbackup
                  backup the current WAL file (run from cron job)
   cleanup [ FILENAME | XLOG | +[1-9]* ]
@@ -173,16 +180,8 @@ get_pg_major_version() {
 
 }
 
-check_dirs() {
-    # Especially when calling currentbackup, specifying a data directory
-    # directly is advisable to avoid frequent database connections.
-    if [ -z "$datadir" ]; then
-        datadir="$(current_setting data_directory)"
-    fi
-
-    if [ ! -r "$datadir"/PG_VERSION ]; then
-        error "cannot read data directory (permissions?)"
-    fi
+## Checks the specified archive directory (-A)
+check_archivedir() {
 
     if [ -z "$archivedir" ]; then
         error "no archive directory specified"
@@ -201,6 +200,23 @@ check_dirs() {
     ## $archivedir must be writable by the postgres user anyways, so we silently
     ## assume that we can use it for the lock file, too.
     LOCK="$archivedir/$(basename $LOCK)"
+
+}
+
+## Checks the specified data directory (-D, if present) or
+## gets the setting from a possible running PostgreSQL instance.
+check_datadir() {
+
+    # Especially when calling currentbackup, specifying a data directory
+    # directly is advisable to avoid frequent database connections.
+    if [ -z "$datadir" ]; then
+        datadir="$(current_setting data_directory)"
+    fi
+
+    if [ ! -r "$datadir"/PG_VERSION ]; then
+        error "cannot read data directory (permissions?)"
+    fi
+
 }
 
 check_lvm_params() {
@@ -332,9 +348,86 @@ do_basebackup() {
 
     local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar --force-local -C "$datadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?
+    tar --force-local -C "$datadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
     psql -c "SELECT pg_stop_backup();" >/dev/null
     [ $status -eq 0 ] || [ $status -eq 1 ]
+}
+
+##
+## Recover the specified basebackup into the specified
+## data directory.
+##
+do_restore_basebackup() {
+
+    local status=0
+    local fn="$archivedir/base/$1"
+    local dn="$datadir"
+
+    # sanity checks first
+    if [ -z "$dn" ]; then
+	error "The restore command requires the -D command line argument"
+    fi
+
+    # check if requested basebackup exists
+    if [ ! -f "$fn" ]; then
+	error "requested basebackup \"$fn\" does not exist"
+    fi
+
+    # File found, proceed. Check if the specified
+    # recovery target directory exists.
+    if [ ! -d "$dn" ]; then
+	error "target directory does not exist"
+    fi
+
+    # Target directory empty?
+    if [ "$(find "$dn" -type f | wc -l)" -gt 2 ]; then
+	## does it contain a running PostgreSQL instance?
+	if [ -e "$dn"/PG_VERSION ]; then
+	    local ver=$(get_pg_major_version)
+	    error "target directory contains a PostgreSQL database cluster \"$ver\""
+	else
+	    error "target directory not empty"
+	fi
+    fi
+
+    # Make sure, target directory has 0700 permissions
+    chmod 0700 $dn
+
+    # Unpack TAR archive into destination directory
+    tar --force-local -C "$dn" -x -z -f "$fn" && echo "successfully restored \"$fn\""
+
+    # create pg_xlog/archive_status directory (newer PostgreSQL
+    # releases will do this automatically, but it doesn't no harm
+    # if done here...
+    mkdir -p "$dn"/pg_xlog/archive_status
+
+    ## place the recovery.conf
+    _gen_recovery_conf "$dn"
+
+    [ $status -eq 0 ] || [ $status -eq 1 ]
+
+}
+
+##
+## Generates a recovery.conf file and places
+## it withtin the specified target directory
+##
+## Caller is responsible to place a valid
+## target directory within $1...
+##
+_gen_recovery_conf() {
+
+    local dn="$1"
+    local cmd=""
+
+    if [ "$gzip" = yes ]; then
+        cmd="gzip -d -c \\'$archivedir/log/%f.gz\\' > \\'%p\\'"
+    else
+        cmd="cp \\'$archivedir/log/%f\\'  \\'%p\\'"
+    fi
+
+    echo "restore_command='$cmd'" > "$dn"/recovery.conf
+
 }
 
 ##
@@ -436,7 +529,7 @@ do_lvmbasebackup() {
     _create_snapshot_LVM "$fn" "$fn"
 
     ## do the backup, fall through all errors!
-    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=pg_xlog . || status=$?
+    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
 
     ## unmount the snapshot
     _remove_snapshot_LVM || status=$?
@@ -601,25 +694,29 @@ do_ls() {
 }
 
 # check prerequisites
-check_dirs
 check_deps
+check_archivedir
 
 case $mode in
     setup)
+	check_datadir
         do_setup;;
     currentbackup)
+	check_datadir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
             do_currentbackup
         ) 284>$LOCK
         ;;
     basebackup)
+	check_datadir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
             do_basebackup
         ) 284>$LOCK
         ;;
     lvmbasebackup)
+	check_datadir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
 	    do_lvmbasebackup
@@ -654,6 +751,14 @@ case $mode in
             do_cleanup "$@"
         ) 284>$LOCK
         ;;
+    restore)
+	## NOTE: do_restore_basebackup() does its
+	##       own sanity checks on $datadir
+	(
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+	    do_restore_basebackup "$1" "$datadir"	    
+	) 284>$LOCK
+	;;
     *)
         error "invalid mode";;
 esac
