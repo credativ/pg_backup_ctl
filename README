@@ -5,7 +5,7 @@ Setting up and managing this type of backup is rather complicated.  We
 provide you with a script to make many things easier, but
 understanding of the process is still desirable.  Please bookmark and
 read the documentation at
-http://www.postgresql.org/docs/8.3/static/continuous-archiving.html
+http://www.postgresql.org/docs/9.2/interactive/continuous-archiving.html
 
 This scripts supports PostgreSQL 8.3 and above.
 
@@ -38,8 +38,8 @@ file system snapshot functionality is required for this.)
 
 2.2
 
-Since release 1.1 pg_backup_ctl supports base backups using LVM snapshots.
-This is done by the new lvmbasebackup command. This requires the -M, -N, -n and
+pg_backup_ctl supports base backups using LVM snapshots.
+This is done by the lvmbasebackup command. This requires the -M, -N, -n and
 -L arguments to pg_backup_ctl. For example, to perform a base backup using
 the LVM snapshot pg_backup on the logical volume /dev/backup/pg_backup with
 a snapshot size of 5GB, you can do:
@@ -171,6 +171,28 @@ removed manually.
 Recovery
 --------
 
+Starting with pg_backup_ctl 0.6 you have the choice to use the
+restore command to recover a basebackup into an empty directory. This
+will create a recovery.conf and a restored basebackup suitable
+to be recovered immediately by starting a PostgreSQL server using
+this directory. For example
+
+./pg_backup_ctl -A /var/lib/pgsql/backup ls+
+Basebackup Filename                                     Size    Required WAL                    Available
+--------------------------------------------------------------------------------
+basebackup_2013-01-04T1517.tar.gz                       3,6M    00000003000000000000008F        YES
+--------------------------------------------------------------------------------
+Total size occupied by 4 WAL segments in archive: 65M
+
+There's one basebackup available, so we are going to restore this:
+
+pg_backup_ctl -A /var/lib/pgsql/backup -D /recovery/pgsql restore basebackup_2013-01-04T1517.tar.gz
+
+The -D parameter is mandatory when using the restore command. You cannot
+use a directory which contains any objects, pg_backup_ctl will refuse to
+do the restore.
+
+It is still possible to do the recovery process completely manually.
 The recovery process is detailed in the documentation.  Broadly
 speaking it works like this:
 
@@ -206,7 +228,7 @@ restore_command = 'cp /var/lib/pgsql/backup/log/%f "%p"'
 Other possible settings to do point-in-time recovery (as opposed to
 recovering to the very end of the log, as we're doing now) are
 detailed in the documentation at
-<http://www.postgresql.org/docs/8.0/static/backup-online.html#RECOVERY-CONFIG-SETTINGS>.
+http://www.postgresql.org/docs/9.2/interactive/recovery-target-settings.html
 
 8. Start the server.
 

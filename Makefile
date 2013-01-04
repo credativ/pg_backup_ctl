@@ -1,7 +1,7 @@
 .PHONY=distri
 PROJECT=pg_backup_ctl
 FILES=pg_backup_ctl README
-PG_BACKUP_CTL_VERSION=0.5
+PG_BACKUP_CTL_VERSION=0.6
 
 
 distribution: ${FILES}
