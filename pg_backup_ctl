@@ -190,7 +190,7 @@ check_archivedir() {
     ## some Linux systems, where /var/lock/ isn't writeable by daemons.
     ## $archivedir must be writable by the postgres user anyway, so we
     ## assume we can use it for the lock file, too.
-    LOCK="$archivedir/$(basename $LOCK)"
+    LOCK="$archivedir/pg_backup_ctl.base.lock"
 
 }
 
