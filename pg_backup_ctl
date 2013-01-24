@@ -159,7 +159,7 @@ timestamp() {
     date +'%Y-%m-%dT%H%M'
 }
 
-check_deps() {
+check_rsync_dep() {
 	# check if needed programs are there
 	if ! command -v rsync >/dev/null; then
 		error "cannot find rsync command"
@@ -294,11 +294,13 @@ do_setup() {
         (echo; echo "# automatically added by $me"; echo "archive_mode = on") >>$cf
     fi
 
+    local pg_major_version=$(get_pg_major_version)
+
     ## Starting with PostgreSQL 9.0, we define different wal levels to adjust the traffic into
     ## the transaction log. For archiving, we need at least wal_level = archive to be set, otherwise
     ## PostgreSQL will refuse to start.
 
-    if [ $(get_pg_major_version) -ge 90 ]; then
+    if [ $pg_major_version -ge 90 ]; then
         local wallevel=$(current_setting wal_level)
 
         if grep -q wal_level "$cf"; then
@@ -316,6 +318,13 @@ do_setup() {
     fi
 
     kill -HUP $(head -1 "$datadir/postmaster.pid")
+
+    # warn if rsync is missing
+    if [ $pg_major_version -lt 90 ]; then
+        if ! command -v rsync >/dev/null; then
+            echo "HINT: rsync is not installed. For PostgreSQL version $pg_major_version, you should use the "currentbackup" functionality of pg_backup_ctl which needs rsync"
+        fi
+    fi
 }
 
 
@@ -696,7 +705,6 @@ do_ls() {
 }
 
 # check prerequisites
-check_deps
 check_archivedir
 
 case $mode in
@@ -704,6 +712,7 @@ case $mode in
 	check_datadir
         do_setup;;
     currentbackup)
+        check_rsync_dep
 	check_datadir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
