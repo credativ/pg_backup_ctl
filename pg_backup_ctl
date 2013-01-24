@@ -36,10 +36,6 @@ export LC_COLLATE=C
 me=$(basename $0)
 hdrline=$(printf "%080d"|tr "0" "-")
 
-## Specify lock file location and locking timeout. Note
-## that LOCK is overriden by check_dirs() to be in $archivedir instead,
-## this is just a fallback setting (which, in fact, isn't currently used).
-LOCK=/var/lock/pg_backup_ctl.base.lock
 PG_BACKUP_LOCK_TIMEOUT=60
 
 help="\
@@ -194,8 +190,8 @@ check_archivedir() {
 
     ## Force LOCK file to be in $archivedir. This fixes an issue on
     ## some Linux systems, where /var/lock/ isn't writeable by daemons.
-    ## $archivedir must be writable by the postgres user anyways, so we silently
-    ## assume that we can use it for the lock file, too.
+    ## $archivedir must be writable by the postgres user anyway, so we
+    ## assume we can use it for the lock file, too.
     LOCK="$archivedir/$(basename $LOCK)"
 
 }
