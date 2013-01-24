@@ -248,7 +248,7 @@ check_lvm_params() {
 do_setup() {
 
     if [ $(ls "$datadir"/pg_tblspc | wc -l) -gt 0 ]; then
-        error "tablespaces not supported"
+        error "clusters uses tablespaces, this is not supported by $me"
     fi
 
     local cmd
@@ -260,11 +260,10 @@ do_setup() {
     local cf=$(current_setting config_file)
 
     if grep -q archive_command "$cf"; then
-        sed -i -e "/archive_command/ c\\
-                   archive_command = '$cmd'
-                   a\\" "$cf"
+        sed -i -e "/archive_command/ c archive_command = '$cmd'" "$cf"
     else
         (echo; echo "# automatically added by $me"; echo "archive_command = '$cmd'") >>$cf
+        echo "Added archive_command to postgresql.conf"
     fi
 
     ## Activate archiving. This requires a server restart if not yet set. Hint the
@@ -273,15 +272,14 @@ do_setup() {
 
     if grep -q archive_mode "$cf"; then
         if [ ! -z "$archivemode" ] && [ "$archivemode" = "off" ]; then
-            sed -i -e '/archive_mode/ c\
-                       archive_mode = on
-                       a\' "$cf"
+            sed -i -e '/archive_mode/ c archive_mode = on' "$cf"
             echo "HINT: activated archive_mode, you need to restart the server to get archiving activated"
         else
             echo "HINT: archive_mode already activated, adjusted archive_command only"
         fi
     else
         (echo; echo "# automatically added by $me"; echo "archive_mode = on") >>$cf
+        echo "Added archive_mode to postgresql.conf"
     fi
 
     local pg_major_version=$(get_pg_major_version)
@@ -295,15 +293,14 @@ do_setup() {
 
         if grep -q wal_level "$cf"; then
             if [ ! -z "$wallevel" ] && [ "$wallevel" != "archive" ] && [ "$wallevel" != "hot_standby" ]; then
-                sed -i -e '/wal_level/ c\
-                           wal_level = archive
-                           a\' "$cf"
+                sed -i -e '/wal_level/ c wal_level = archive' "$cf"
                 echo "HINT: set wal_level to 'archive', you need to restart the server to get this setting into effect"
             else
                 echo "HINT: wal_level already set to 'archive'"
             fi
         else
             (echo; echo "# automatically added by $me"; echo "wal_level = archive") >>$cf
+            echo "Added wal_level to postgresql.conf"
         fi
     fi
 
