@@ -46,16 +46,12 @@ help="\
 PostgreSQL transaction log archival backup control program
 Supports PostgreSQL 8.3 and above
 
-Usage:
-  $me MODE [OPTION...]
+Usage: $me -A ARCHIVEDIR [OPTION...] MODE
 
 Modes:
-  setup
-                 prepare server for transaction log archival
-  basebackup
-                 perform a base backup
-  lvmbasebackup
-                 perform a base backup using LVM snapshot
+  setup          prepare server for transaction log archival
+  basebackup     perform a base backup
+  lvmbasebackup  perform a base backup using LVM snapshot
                  (requires -L, -n and -M)
   create-lvmsnapshot
                  create a LVM snapshot for an external backup command
@@ -70,8 +66,7 @@ Modes:
                  The destination directory will also contain a generated
                  recovery.conf, suitable to start a PostgreSQL instance for
                  recovery immediately.
-  currentbackup
-                 backup the current WAL file (run from cron job)
+  currentbackup  backup the current WAL file (run from cron job)
   cleanup [ FILENAME | XLOG | +[1-9]* ]
                  remove old WAL files after new base backup (run from cron job)
 
@@ -87,19 +82,19 @@ Modes:
                  If no argument is specified, cleanup will remove all WAL
                  files except those which are required by the latest base
                  backup.
-  ls[+]
-                 Lists available base backups and their size in the current archive.
+  ls[+]          Lists available base backups and their size in the current archive.
                  When issued with +, the ls command will examine the WAL archive
                  and the minimum WAL segment file, required to use the backup
                  to perform a full recovery.
 
 Options:
-  -A DIR        archival target directory (required)
-  -D DIR        database system directory (recommended)
-  -h HOSTNAME   server host name
+  -A ARCHIVEDIR archival target directory (required)
+  -D DATADIR    database system directory (recommended)
+  -m            archive old log files before deleting them
+  -z            use gzip to compress archived WAL segments
+LVM snapshot control:
   -L LVM SIZE   determines the buffer size for a LVM snapshot
   -M VOLUME     LVM volume identifier to create the snapshot on
-  -m            archive old log files before deleting them
   -n SNAPSHOT   LVM snapshot volume name
   -N LVMDATADIR Taking LVM snapshot is done by mounting
                 a LVM snapshot in ARCHIVE/lvm_snapshot. You need
@@ -107,9 +102,10 @@ Options:
                 the mountpoint in ARCHIVE/lvm_snapshot
   -o MOUNTOPTS  additional options passed to snapshot mount if used
                 with LVM snapshots
+Server connection control:
+  -h HOSTNAME   server host name
   -p PORT       server port
-  -U USERNAME   user name for database connections
-  -z            use gzip to compress archived WAL segments
+  -U USERNAME   server user name
 "
 
 if [ "$1" = "--help" ]; then
