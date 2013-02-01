@@ -218,7 +218,7 @@ check_lvm_params() {
 
 	## specified volume exists?
 	if [ -z "$lvm_vol" ]; then
-		error "no LVM volume specified"
+		error "no LVM volume (-M) specified"
         else
                 if ! sudo /sbin/lvdisplay $lvm_vol > /dev/null 2>&1; then
                     error "logical volume \"$lvm_vol\" not found"
