@@ -48,10 +48,10 @@ Modes:
   setup          prepare server for transaction log archival
   basebackup     perform a base backup
   lvmbasebackup  perform a base backup using LVM snapshot
-                 (requires -L, -M and -n)
+                 (requires -L -M -n -N)
   create-lvmsnapshot
                  create an LVM snapshot for an external backup command
-                 (requires -L, -M and -n)
+                 (requires -L -M -n -N)
   remove-lvmsnapshot
                  remove an LVM snapshot created with create-lvmsnapshot
   restore BASEBACKUP
@@ -91,10 +91,8 @@ LVM snapshot control:
   -L LVM SIZE   determines the buffer size for an LVM snapshot
   -M VOLUME     LVM volume identifier to create the snapshot on
   -n SNAPSHOT   LVM snapshot volume name
-  -N LVMDATADIR Taking LVM snapshot is done by mounting
-                an LVM snapshot in ARCHIVE/lvm_snapshot. You need
-                to specify the PostgreSQL DATADIR relative to
-                the mountpoint in ARCHIVE/lvm_snapshot
+  -N LVMDATADIR PostgreSQL DATADIR relative to partition (i.e. the path
+                to DATADIR inside the LVM snapshot)
   -o MOUNTOPTS  additional options passed to LVM snapshot mount
 Server connection control:
   -h HOSTNAME   server host name
@@ -237,7 +235,7 @@ check_lvm_params() {
 	fi
 
 	if [ -z "$lvmdatadir" ]; then
-		error "LVM snapshots requires the datadir relative to $archivedir/lvm_snapshot"
+		error "LVM snapshots requires the datadir relative to $archivedir/lvm_snapshot (-N)"
 	fi
 
         if [ ! -z "$mountopts" ]; then
