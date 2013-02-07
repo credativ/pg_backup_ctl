@@ -345,6 +345,7 @@ do_basebackup() {
     local fn="$archivedir/base/basebackup_$ts.tar.gz"
     trap "rm -f $tmpfn" 0 2 3 15 # clean up on error
 
+    [ -f "$fn" ] && error "Basebackup $fn already exists"
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
     tar --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
     psql -c "SELECT pg_stop_backup();" >/dev/null
