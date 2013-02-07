@@ -340,12 +340,22 @@ do_currentbackup() {
 do_basebackup() {
 
     local status=0
+    local ts="$(timestamp)"
+    local tmpfn="$archivedir/base/.basebackup_$ts.tar.gz.in-progress"
+    local fn="$archivedir/base/basebackup_$ts.tar.gz"
+    trap "rm -f $tmpfn" 0 2 3 15 # clean up on error
 
-    local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar --force-local -C "$datadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
+    tar --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
     psql -c "SELECT pg_stop_backup();" >/dev/null
-    [ $status -eq 0 ] || [ $status -eq 1 ]
+
+    if [ $status -eq 0 ] || [ $status -eq 1 ]; then # exit 1 is "some files changed"
+	mv "$tmpfn" "$fn"
+	return 0
+    else
+	rm -f "$tmpfn"
+	return $status
+    fi
 }
 
 ##
