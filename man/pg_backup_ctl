@@ -1,0 +1,200 @@
+.TH PG_BACKUP_CTL "1" "2013-03-14" "PostgreSQL Tools" "pg_backup_ctl"
+.SH NAME
+pg_backup_ctl \- Utility to backup and recover a running PostgresSQL data directory.
+
+.SH SYNOPSIS
+pg_backup_ctl [\fIoptions\fR...]
+
+.SH DESCRIPTION
+pg_backup_ctl is a tool to simplify the steps needed to make a full transaction log archival Backup of PostgreSQL clusters. All steps performed by this script can also done manually. See http://www.postgresql.org/docs/9.2/interactive/continuous-archiving.html for details. Furthermore this script implements several functions to prepare for backups using LVM-Snapshots.
+
+This script supports PostgreSQL 8.3 and above.
+
+While setup pg_backup_ctl will make some modifications to postgresql.conf specified in running_config. To work correctly 2 options will be set: 
+    - \fBarchive_command\fR used to copy archived WAL files to \fIarchivedir\fR/log/ directory
+    - \fBwal_level\fR will be set to archive, if isn't already at \fBarchive\fR or \fBhot-standby\fR.
+    - \fBarchive_mode\fR will be set to on
+If these modifications aren't already done, the server needs to restart after setup to take over these changes.
+
+pg_backup_ctl should be run as \fBpostgres\fR user (or any other user that runs the postgresql daemon). In addition, if the \fBLVM\fR features where used, the user needs the appropriate permissions (add sudo execution privileges for postgres to the following commands: \fBlvcreate\fR, \fBlvremove\fR, \fBlvdisplay\fR, \fBmount\fR, \fBlvdisplay\fR)
+
+.SH MODES
+\fBsetup\fR
+.RS 4
+Prepare server for transaction log archival and setup the environment.
+
+This adjusts the server configuration file as required and reloads the
+server configuration.  However, since PostgreSQL 8.3 the script needs to set
+the archive_mode explicitly to on, forcing the administrator to restart the
+PostgreSQL instance (if required). After a restart (assuming there is database
+activity), you should be seeing files appearing in
+/var/lib/pgsql/backup/log.
+.RE
+
+\fBbasebackup\fR
+.RS 4
+Perform a base backup of the currently running PostgreSQL cluster.
+
+You should run this command from a cron job (mind the postgres user)
+once a night.  (Once a week or other intervals are also conceivable
+but will lead to huge recovery times for your data volume.)
+
+You could replace this step by taking a file system snapshot.  This
+might save space and time but would otherwise be functionally
+equivalent.  You can also alter the script accordingly.  Look into the
+line that calls the tar program.
+.RE
+
+\fBlvmbasebackup\fR
+.RS 4
+Perform a base backup using LVM snapshot.
+(Requires \fB-L\fR, \fB-M\fR, -\fBn\fR, \fB-N\fR)
+.RE
+
+\fBcreate-lvmsnapshot\fR
+.RS 4
+Create an LVM snapshot for an external backup command like bacula.
+(Requires \fB-L\fR, \fB-M\fR, -\fBn\fR, \fB-N\fR)
+.RE
+
+\fBremove-lvmsnapshot\fR
+.RS 4
+Remove an LVM snapshot created with create-lvmsnapshot.
+.RE
+
+\fBresotre\fR \fIbasebackup\fR
+.RS 4
+Restores the specified basebackup into the specified directory by the \fB-D\fR parameter.
+
+The directory must already exists and be empty. If the directory, wich is specified as target location, isn't empty pg_backup_ctl will refuse it as target.
+
+The destination directory will also contain a generated \fBrecovery.conf\fR, suitable to start a PostgreSQL instance for recovery immediately.
+
+It is still possible to do the recovery process completely manually. The recovery process is detailed in the documentation.
+.RE
+
+\fBcurrentbackup\fR
+.RS 4
+Backup the current WAL file. This command should be called from a cronjob.
+.RE
+
+\fBcleanup [ \fIfilename\fR | \fIxlog\fR | \fI+[1-9]*\fR ]
+.RS 4
+Remove old WAL files after new base backup. This command sould also run by a cron job.
+
+One typically runs this command from a cron job once a minute (whatever the desired backup frequency) your data volume will cause log segments to fill up on the order of minutes anyway, so this step can then be omitted.
+
+This will only clean up old log segments.  Old base backups have to be
+removed manually.
+
+It is possible to specify the base backup filename \fIfilename\fR, wich WAL files should be kept at least or the WAL file \fIxlog\fR. If a positive number greater than zero is specified, the cleanup command will treat it as its retention policy and keep at least this number of base backup files. Please note that the latter form of the cleanup command will delete all outdated base backups as well whereas the two forms of cleanup invoke with filename will delete the WAL files only.
+
+If no argument is specified, cleanup will remove all WAL files except those wich are required by the latest base backup.
+.RE
+
+\fBls[+]\fR
+.RS 4
+Lists available base backups and there size in the current archive. When issued with \fB+\fR, the \fBls\fR command will examine the WAL archive and the minimum WAL segment file, required to use the backup to perform a full recovery.
+.RE
+
+
+.SH OPTIONS
+The following command-line options control actions done by pg_backup_ctl.
+
+\fB-A\fR \fIarchivedir\fR
+.RS 4
+Directory with will contain the backup-files. This parameter is required at all actions. It will also contain configuration and history files needed for all actions, except setup.
+
+.RE
+\fB-D\fR \fIdatadir\fR
+.RS 4
+PostgresSQL data directory. If PostgreSQL is running this parameter isn't used and will come from PostgreSQL running_configuration.
+
+.RE
+\fB-m\fR
+.RS 4
+Take care of old archive log files, archive these files before deleting them.
+
+.RE
+\fB-z\fR
+.RS 4
+Compression. Use \fBgzip\fR to compress archived WAL segments.
+
+.RE
+\fB-L\fR \fIlvm-size\fR
+.RS 4
+Determines the buffer size for an LVM snapshot.
+
+.RE
+\fB-M\fR \fIvolume\fR
+.RS 4
+LVM volume identifier to create the snapshot on. Needed for LVM-Backup.
+
+.RE
+\fB-n\fR \fIname\fR
+.RS 4
+LVM snapshot volume name. Needed for LVM-Backup. The backup_lable will be named after it.
+
+.RE
+\fB-N\fR \fIlvm-data-dir\fR
+.RS 4
+PostgreSQL DATADIR relative to partition (i.e the path to DATADIR inside the LVM snapshot).
+
+.RE
+\fB-o\fR \fImount-options\fR
+.RS 4
+Additional options passed to LVM snapshot mount.
+
+.RE
+\fB-h\fR \fIhostname\fR
+.RS 4
+Server hostname that running PostgreSQL.
+Specifies the host name of the machine on which the server is running. If the value begins with a slash, it is used as the directory for the Unix domain socket. (See \fBpgsql\fR(1) for details)
+
+.RE
+\fB-p\fR \fIport\fR
+.RS 4
+Specifies the TCP port or local Unix domain socket file extension on which the server is listening for connections. (See \fBpgsql\fR(1) for details)
+
+.RE
+\fB-M\fU \fIusername\fR
+.RS 4
+User name to connect as.
+
+.SH EXAMPLES
+To setup the environment and PostgreSQL configuration settings for further cluster backups at /mnt/backup/pgsql:
+.sp
+.RS 4
+$ \fBpg_backup_ctl -A /mnt/backup/pgsql setup\fR
+.RE
+activity)
+/var/lib/pgsql/backup/log.
+
+To do a base backup (Note: setup the environment is required):
+.sp
+.RS 4
+$ \fBpg_backup_ctl -A /mnt/backup/pgsql basebackup\fR
+.RE
+
+To copy the current og segment(s):
+.sp
+.RS 4
+$ \fBpg_backup_ctl -A /mnt/backup/pgsql currentbackup\fR
+.RE
+
+To show up the backups that are available:
+.sp
+.RS 4
+$ \fBpg_backup_ctl -A /mnt/backup/pgsql ls+\fR
+.RE
+
+To recover a base backup (e.g. basebackup_2013-01-04T1517.tar.gz) to the directory /recover/pgsql (the server may not run):
+.sp
+.RS 4
+$ \fBpg_backup_ctl -A /mnt/backup/pgsql -D /recovery/pgsql restore basebackup_2013-01-04T1517.tar.gz\fR
+.sp
+$ \fBpg_ctl start -D /recovery/pgsql\fR
+.RE
+
+.SH SEE ALSO
+\fBpg_dump\fR(1), \fBpgsql\fR(1), \fBpg_basebackup\fR(1)
