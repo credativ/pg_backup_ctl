@@ -10,7 +10,7 @@ pg_backup_ctl is a tool to simplify the steps needed to make a full transaction 
 
 This script supports PostgreSQL 8.3 and above.
 
-While setup pg_backup_ctl will make some modifications to postgresql.conf specified in running_config. To work correctly 2 options will be set: 
+While setup pg_backup_ctl will make some modifications to postgresql.conf specified in running_config. To work correctly 3 options will be set: 
     - \fBarchive_command\fR used to copy archived WAL files to \fIarchivedir\fR/log/ directory
     - \fBwal_level\fR will be set to archive, if isn't already at \fBarchive\fR or \fBhot-standby\fR.
     - \fBarchive_mode\fR will be set to on
