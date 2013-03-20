@@ -1,6 +1,6 @@
 .TH PG_BACKUP_CTL "1" "2013-03-14" "PostgreSQL Tools" "pg_backup_ctl"
 .SH NAME
-pg_backup_ctl \- Utility to backup and recover a running PostgresSQL data directory.
+pg_backup_ctl \- Utility to backup and recover a running PostgresSQL database server
 
 .SH SYNOPSIS
 pg_backup_ctl [\fIoptions\fR...]
@@ -62,7 +62,7 @@ Create an LVM snapshot for an external backup command like bacula.
 Remove an LVM snapshot created with create-lvmsnapshot.
 .RE
 
-\fBresotre\fR \fIbasebackup\fR
+\fBrestore\fR \fIbasebackup\fR
 .RS 4
 Restores the specified basebackup into the specified directory by the \fB-D\fR parameter.
 
@@ -167,8 +167,6 @@ To setup the environment and PostgreSQL configuration settings for further clust
 .RS 4
 $ \fBpg_backup_ctl -A /mnt/backup/pgsql setup\fR
 .RE
-activity)
-/var/lib/pgsql/backup/log.
 
 To do a base backup (Note: setup the environment is required):
 .sp
@@ -176,7 +174,7 @@ To do a base backup (Note: setup the environment is required):
 $ \fBpg_backup_ctl -A /mnt/backup/pgsql basebackup\fR
 .RE
 
-To copy the current og segment(s):
+To copy the current log segment(s):
 .sp
 .RS 4
 $ \fBpg_backup_ctl -A /mnt/backup/pgsql currentbackup\fR
