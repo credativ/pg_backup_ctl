@@ -1,0 +1,16 @@
+Source: pg-backup-ctl
+Section: x11
+Priority: optional
+Maintainer: Adrian Vondendriesch <discostu@zoozer.de>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.3
+#Homepage: 
+#Vcs-Git: git://git.debian.org/collab-maint/pg-backup-ctl.git
+#Vcs-Browser: http://git.debian.org/?p=collab-maint/pg-backup-ctl.git;a=summary
+
+Package: pg-backup-ctl
+Architecture: all
+Depends: ${misc:Depends}
+Description: Utility to backup and recover a running PostgresSQL database
+ pg_backup_ctl is a tool to simplify the steps needed to make a full
+ transaction log archival backup of PostgreSQL clusters.

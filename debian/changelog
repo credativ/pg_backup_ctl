@@ -1,0 +1,5 @@
+pg-backup-ctl (0.6-1) unstable; urgency=low
+
+  * Initial release 
+
+ -- Adrian Vondendriesch <discostu@zoozer.de>  Fri, 15 Mar 2013 10:08:10 +0100
