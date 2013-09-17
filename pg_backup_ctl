@@ -38,7 +38,8 @@ hdrline=$(printf "%080d"|tr "0" "-")
 
 PG_BACKUP_LOCK_TIMEOUT=60
 
-help="\
+print_help() {
+	cat <<EOF
 PostgreSQL transaction log archival backup control program
 Supports PostgreSQL 8.3 and above
 
@@ -98,11 +99,12 @@ Server connection control:
   -h HOSTNAME   server host name
   -p PORT       server port
   -U USERNAME   server user name
-"
+EOF
+	exit 0
+}
 
 if [ "${1:---help}" = "--help" ]; then
-    echo "$help"
-    exit 0
+    print_help
 fi
 
 set -- $(getopt A:D:h:L:M:mn:N:o:p:U:z "$@")
@@ -129,8 +131,10 @@ done
 
 export PGDATABASE=postgres
 
-mode=$1; shift || :
+mode=$1
+shift
 
+# functions
 
 error() {
     echo "$me:" "$@" 1>&2
@@ -699,6 +703,12 @@ do_ls() {
     echo $hdrline
     printf "Total size occupied by %d WAL segments in archive: %-9s\n" $walcount $wallogsize
 }
+
+# main
+
+if [ "$mode" = "help" ]; then
+    print_help
+fi
 
 # check prerequisites
 check_archivedir
