@@ -347,7 +347,7 @@ do_basebackup() {
 
     [ -f "$fn" ] && error "Basebackup $fn already exists"
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
+    tar --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' . || status=$?
     psql -c "SELECT pg_stop_backup();" >/dev/null 2>&1 # suppress HINWEIS:  pg_stop_backup abgeschlossen
 
     if [ $status -eq 0 ] || [ $status -eq 1 ]; then # exit 1 is "some files changed"
