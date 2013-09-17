@@ -174,6 +174,7 @@ get_pg_major_version() {
 }
 
 ## Checks the specified archive directory (-A)
+## Args: $1: extra directory to create (current, lvm_snapshot)
 check_archivedir() {
 
     if [ -z "$archivedir" ]; then
@@ -182,7 +183,7 @@ check_archivedir() {
 
     local x
 
-    for x in "$archivedir"/{base,log,current,lvm_snapshot}; do
+    for x in "$archivedir"/{base,log} ${1:+"$archivedir/$1"}; do
         if [ ! -d "$x" ]; then
             mkdir -p "$x"
         fi
@@ -706,19 +707,16 @@ do_ls() {
 
 # main
 
-if [ "$mode" = "help" ]; then
-    print_help
-fi
-
-# check prerequisites
-check_archivedir
-
 case $mode in
+    help)
+	print_help;;
     setup)
+	check_archivedir
 	check_datadir
         do_setup;;
     currentbackup)
         check_rsync_dep
+	check_archivedir current
 	check_datadir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
@@ -726,6 +724,7 @@ case $mode in
         ) 284>$LOCK
         ;;
     basebackup)
+	check_archivedir
 	check_datadir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
@@ -733,6 +732,7 @@ case $mode in
         ) 284>$LOCK
         ;;
     lvmbasebackup)
+	check_archivedir lvm_snapshot
 	check_datadir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
@@ -740,12 +740,14 @@ case $mode in
         ) 284>$LOCK
         ;;
     create-lvmsnapshot)
+	check_archivedir lvm_snapshot
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
 	    do_create-lvmsnapshot
         ) 284>$LOCK
         ;;
     remove-lvmsnapshot)
+	check_archivedir lvm_snapshot
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
 	    do_remove-lvmsnapshot
@@ -763,12 +765,14 @@ case $mode in
         ) 284>$LOCK
         ;;
     cleanup)
+	check_archivedir
         (
             flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
             do_cleanup "$@"
         ) 284>$LOCK
         ;;
     restore)
+	check_archivedir
 	## NOTE: do_restore_basebackup() does its
 	##       own sanity checks on $datadir
 	(
