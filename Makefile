@@ -1,5 +1,5 @@
 PROJECT = pg_backup_ctl
-PG_BACKUP_CTL_VERSION = 0.6
+PG_BACKUP_CTL_VERSION = 0.7
 
 FILES = Makefile pg_backup_ctl pg_backup_ctl.1 README
 PREFIX = /usr

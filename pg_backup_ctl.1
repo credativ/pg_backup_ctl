@@ -194,5 +194,17 @@ $ \fBpg_backup_ctl -A /mnt/backup/pgsql -D /recovery/pgsql restore basebackup_20
 $ \fBpg_ctl start -D /recovery/pgsql\fR
 .RE
 
+.SH CAVEATS
+
+pg_backup_ctl internally protects itself against concurrent execution
+with the flock command line tool. This places a lock file into the
+archive directory, which will hold an exclusive lock on it to prevent
+another pg_backup_ctl to concurrently modify the archive. This doesn't
+work on network filesystems like SMBFS or CIFS, especially when mounted
+from a Windows(tm) server. In this case you should use the -l option
+to place the lockfile into a directory on a local filesystem.
+Older distributions doesn't have the flock command line tool, but it's
+possible to just comment out the locking subscripts.
+
 .SH SEE ALSO
-\fBpg_dump\fR(1), \fBpgsql\fR(1), \fBpg_basebackup\fR(1)
+\fBpg_dump\fR(1), \fBpgsql\fR(1), \fBpg_basebackup\fR(1), \fBflock\fR(1)
