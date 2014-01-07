@@ -163,6 +163,31 @@ check_rsync_dep() {
 }
 
 ##
+## Runs a command within a exclusive locking. This functions is required to run
+## a command only once at a time.
+##
+run_with_lock() {
+    set +e  # disable immediate exit on errors for this function
+
+    local rc command="$*"
+    (
+        flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+        rc=$?
+
+        # check if the lock was aquired
+        if [ $rc -eq 0 ]; then
+            $command
+        else
+            error "failed to run \"$command\" could not aquire exclusive lock
+            $LOCK"
+        fi
+
+    ) 284>$LOCK
+
+    set -e
+}
+
+##
 ## Returns the PostgreSQL major version of the specified PGDATA directory
 ## as an integer. That is, the first two digits are concatenated to a unified
 ## number so it can be compared arithmetically (e.g. 9.0.4 will be returned
@@ -722,40 +747,25 @@ case $mode in
         check_rsync_dep
 	check_archivedir current
 	check_datadir
-        (
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-            do_currentbackup
-        ) 284>$LOCK
+        run_with_lock do_currentbackup
         ;;
     basebackup)
 	check_archivedir
 	check_datadir
-        (
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-            do_basebackup
-        ) 284>$LOCK
+        run_with_lock do_basebackup
         ;;
     lvmbasebackup)
 	check_archivedir lvm_snapshot
 	check_datadir
-        (
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-	    do_lvmbasebackup
-        ) 284>$LOCK
+        run_with_lock do_lvmbasebackup
         ;;
     create-lvmsnapshot)
 	check_archivedir lvm_snapshot
-        (
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-	    do_create-lvmsnapshot
-        ) 284>$LOCK
+        run_with_lock do_create-lvmsnapshot
         ;;
     remove-lvmsnapshot)
 	check_archivedir lvm_snapshot
-        (
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-	    do_remove-lvmsnapshot
-        ) 284>$LOCK
+        run_with_lock do_remove-lvmsnapshot
         ;;
     ls)
         ## ls command without any arguments accesses the
@@ -764,27 +774,18 @@ case $mode in
         ;;
     ls+)
         check_archivedir
-        (
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-            do_ls '+'
-        ) 284>$LOCK
+        run_with_lock do_ls '+'
         ;;
     cleanup)
 	check_archivedir
-        (
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-            do_cleanup "$@"
-        ) 284>$LOCK
+        run_with_lock do_cleanup "$@"
         ;;
     restore)
 	check_archivedir
-	## NOTE: do_restore_basebackup() does its
-	##       own sanity checks on $datadir
-	(
-            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-	    do_restore_basebackup "$1" "$datadir"	    
-	) 284>$LOCK
-	;;
+        ## NOTE: do_restore_basebackup() does its
+        ##       own sanity checks on $datadir
+        run_with_lock do_restore_basebackup "$1" "$datadir"
+	    ;;
     *)
         error "invalid mode: \"$1\"";;
 esac
