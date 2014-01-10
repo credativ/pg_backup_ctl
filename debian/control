@@ -1,7 +1,7 @@
 Source: pg-backup-ctl
 Section: x11
 Priority: optional
-Maintainer: Adrian Vondendriesch <discostu@zoozer.de>
+Maintainer: Adrian Vondendriesch <adrian.vondendriesch@credativ.de>
 Build-Depends: debhelper (>= 8.0.0)
 Standards-Version: 3.9.3
 #Homepage: 
