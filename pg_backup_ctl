@@ -1,9 +1,13 @@
 #!/bin/bash
 
-# Copyright (c) 2007 Peter Eisentraut <peter.eisentraut@credativ.de>
-# Copyright (c) 2007-2012 Bernd Helmle <bernd.helmle@credativ.de>
-# Copyright (c) 2011-2012 Arnd Hannemann <arnd.hannemann@credativ.de>
-# Copyright (c) 2012-2013 Christoph Berg <christoph.berg@credativ.de>
+# Copyright (c) 2007-2014 credativ GmbH
+#
+# AUTHORS:
+#    Peter Eisentraut <peter.eisentraut@credativ.de>
+#    Bernd Helmle <bernd.helmle@credativ.de>
+#    Christoph Berg <christoph.berg@credativ.de>
+#    Arnd Hannemann <arnd.hannemann@credativ.de>
+#    Adrian Vondendriesch <adrian.vondendriesch@credativ.de>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -370,6 +374,26 @@ do_currentbackup() {
     done
 }
 
+do_streambackup() {
+
+    local status=0
+    local ts="$(timestamp)"
+
+    local tmpfn="$archivedir/base/.streaming_backup_$ts.in-progress"
+    local fn="$archivedir/base/streaming_backup_$ts"
+    trap "rm -rf $tmpfn" 0 2 3 15 # clean up on error
+
+    [ -d "$fn" ] && error "Streaming basebackup $fn already exists"
+    pg_basebackup -l "$fn" -Ft -D "$archivedir/base/$tmpfn" || status=$?
+
+    if [ $status -eq 0 ] ; then
+	mv "$tmpfn" "$fn"
+	return 0
+    else
+	rm -rf "$tmpfn"
+	return $status
+    fi
+}
 
 do_basebackup() {
 
@@ -706,7 +730,11 @@ do_ls() {
             *SNAPSHOT*)
                 basesize=0
                 ;;
-            *)
+            base/streaming_backup*)
+                # This is an archive directory containing a streaming base backup
+                basesize=$(du -sh "$fn" | awk '{print $1;}')
+                ;;
+            [0-9]*)
                 echo "$x: Label \"$fn\" is not an expected basebackup filename"
                 continue
                 ;;
