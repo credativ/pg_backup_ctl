@@ -178,15 +178,18 @@ to be recovered immediately by starting a PostgreSQL server using
 this directory. For example
 
 ./pg_backup_ctl -A /var/lib/pgsql/backup ls+
-Basebackup Filename                                     Size    Required WAL                    Available
+Basebackup Filename              	Size	Required WAL             Available
 --------------------------------------------------------------------------------
-basebackup_2013-01-04T1517.tar.gz                       3,6M    00000003000000000000008F        YES
+streaming_backup_2014-01-13T1133 	3.0M	00000001000000000000002F YES
+streaming_backup_2014-01-13T1132 	3.0M	00000001000000000000002D YES
+streaming_backup_2014-01-09T1802 	3.0M	00000001000000000000002B YES
+basebackup_2014-01-09T1802.tar.gz	3.0M	00000001000000000000002A YES
 --------------------------------------------------------------------------------
-Total size occupied by 4 WAL segments in archive: 65M
+Total size occupied by 8 WAL segments in archive: 129M 
 
 There's one basebackup available, so we are going to restore this:
 
-pg_backup_ctl -A /var/lib/pgsql/backup -D /recovery/pgsql restore basebackup_2013-01-04T1517.tar.gz
+pg_backup_ctl -A /var/lib/pgsql/backup -D /recovery/pgsql restore basebackup_2014-01-09T1802.tar.gz
 
 The -D parameter is mandatory when using the restore command. You cannot
 use a directory which contains any objects, pg_backup_ctl will refuse to
@@ -254,3 +257,19 @@ to place the lockfile into a directory on a local filesystem.
 
 Older distributions doesn't have the flock command line tool, but it's
 possible to just comment out the locking subscripts.
+
+The basebackup command currently doesn't support tablespaces. Use streaming
+base backups instead, which has full support for tablespaces.
+
+The -T option is supported on PostgreSQL >= 9.2 only.
+
+If you restore a streaming base backup with tablespaces, you should be aware that
+the default operation mode restores the tablespace into the original directories.
+This doesn't work if you are going to restore the backup on the same machine and
+will cause the restore command to abort with an error, telling you that the
+target directory isn't empty (obviously, since it already contains the original
+tablespace data). Use the -T option instead, which will force pg_backup_ctl
+to use an alternative tablespace restore location. However, this substitutes
+all tablespace directories to be located in a single top level directory, even
+if you have used different directories in your source installation. The tablespaces
+will be adjusted and have a layout and naming according to their OID.

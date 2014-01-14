@@ -90,7 +90,10 @@ Modes:
 
 Options:
   -A ARCHIVEDIR archival target directory (required)
-  -D DATADIR    database system directory (recommended)
+  -D DATADIR    database system directory (required for specific commands)
+  -T TABLESPACE Target directory for tablespace location during restore
+                (replaces the original symlinks in the base backup, but places
+                all tablespaces into one directory)
   -m            archive old log files before deleting them
   -z            use gzip to compress archived WAL segments
   -l            Place pg_backup_ctl lock file in the specified directory
@@ -114,7 +117,7 @@ if [ "${1:---help}" = "--help" ]; then
     print_help
 fi
 
-set -- $(getopt A:D:h:l:L:M:mn:N:o:p:U:z "$@")
+set -- $(getopt A:D:h:l:L:M:mn:N:o:p:U:T:z "$@")
 
 while :; do
     case $1 in
@@ -130,6 +133,7 @@ while :; do
 	-N) lvmdatadir=$2; shift;;
         -o) mountopts=$2; shift;;
         -p) export PGPORT=$2; shift;;
+        -T) pgtblspc_replace_dir=$2; shift;;
         -U) export PGUSER=$2; shift;;
         -z) gzip=yes;;
         --) shift; break;;
@@ -159,11 +163,25 @@ timestamp() {
     date +'%Y-%m-%dT%H%M'
 }
 
+check_psql_dep() {
+    # check if psql binary is available
+    if ! command -v psql >/dev/null; then
+        error "cannot find psql executable"
+    fi
+}
+
+check_pg_basebackup_dep() {
+    # check if pg_basebackup can be found somewhere
+    if ! command -v pg_basebackup >/dev/null; then
+        error "cannot find pg_basebackup executable"
+    fi
+}
+
 check_rsync_dep() {
-	# check if needed programs are there
-	if ! command -v rsync >/dev/null; then
-		error "cannot find rsync command"
-	fi;
+    # check if needed programs are there
+    if ! command -v rsync >/dev/null; then
+	error "cannot find rsync executable"
+    fi;
 }
 
 ##
@@ -204,6 +222,39 @@ get_pg_major_version() {
     local PGMAJOR=$(cat "$datadir"/PG_VERSION | awk -F'.' '{print $1$2;}')
     echo $PGMAJOR
 
+}
+
+##
+## Returns the PostgreSQL major version found in the specified base backup.
+##
+get_backup_pg_major_version() {
+
+    local bf="$1"
+    local basebackup=""
+
+    ## backup file exists?
+    case $bf in
+
+        streaming_backup*)
+
+            basebackup="$archivedir"/base/"$bf"/base.tar.gz
+            ;;
+
+        basebackup*)
+
+            basebackup="$archivedir"/base/"$bf"
+            ;;
+
+        *)
+            error "unknown base backup format \"$bf\""
+            ;;
+    esac
+
+    if [ ! -f "$basebackup" ]; then
+        echo 0
+    fi
+
+    echo $(LC_ALL=C tar -xzf $basebackup -O global/pg_control | pg_controldata | grep "pg_control version number" | awk -F '[ ]{12}' '{print substr($2, 1, 2);}')
 }
 
 ## Checks the specified archive directory (-A)
@@ -384,7 +435,8 @@ do_streambackup() {
     trap "rm -rf $tmpfn" 0 2 3 15 # clean up on error
 
     [ -d "$fn" ] && error "Streaming basebackup $fn already exists"
-    pg_basebackup -l "$fn" -Ft -D "$archivedir/base/$tmpfn" || status=$?
+    # NOTE: We don't want to see any NOTICE messages here...
+    PGOPTIONS='--client-min-messages=WARNING' pg_basebackup -z -l "$fn" -Ft -D "$tmpfn" || status=$?
 
     if [ $status -eq 0 ] ; then
 	mv "$tmpfn" "$fn"
@@ -406,7 +458,9 @@ do_basebackup() {
     [ -f "$fn" ] && error "Basebackup $fn already exists"
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
     tar --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' . || status=$?
-    psql -c "SELECT pg_stop_backup();" >/dev/null 2>&1 # suppress HINWEIS:  pg_stop_backup abgeschlossen
+
+    # NOTE: We don't want to see any NOTICE messages here, but error messages...
+    PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
 
     if [ $status -eq 0 ] || [ $status -eq 1 ]; then # exit 1 is "some files changed"
 	mv "$tmpfn" "$fn"
@@ -433,7 +487,7 @@ do_restore_basebackup() {
     fi
 
     # check if requested basebackup exists
-    if [ ! -f "$fn" ]; then
+    if [ ! -f "$fn" ] && [ ! -d "$fn" ]; then
 	error "requested basebackup \"$fn\" does not exist"
     fi
 
@@ -457,12 +511,51 @@ do_restore_basebackup() {
     # Make sure, target directory has 0700 permissions
     chmod 0700 $dn
 
-    # Unpack TAR archive into destination directory
-    tar --force-local -C "$dn" -x -z -f "$fn" && echo "successfully restored \"$fn\""
+    ## Unpack the base backup into the destination
+    ## PGDATA directory
+    case "$(basename ${fn})" in
+        streaming_backup*)
+
+            ## Check if we have a PostgreSQL Major release and the -T option
+            ## specified. We need to error out in case we deal with a major
+            ## version < 9.2, since the pg_tablespace shared catalog has the
+            ## tablespace directories stored for pg_dump.
+            ## We might relax this, since it's easy to adjust it manually, but
+            ## i usually don't recommend with fooling around with system
+            ## catalogs directly. So follow this route and don't encourage
+            ## people to do stupid things ;)
+            if [ $(get_backup_pg_major_version "$(basename ${fn})") -lt 92 ] && [ ! -z "$pgtblspc_replace_dir" ]; then
+                error "-T is supported for PostgreSQL >= 9.2 only"
+            fi
+
+            echo "restoring base archive"
+            tar --force-local -C "$dn" -x -z -f "$fn"/base.tar.gz && echo "successfully restored base.tar.gz"
+            echo "checking for tablespaces"
+
+            ## Get all OIDs for tablespaces to be restored, call _restore_tablespace
+            ## for each OID found...
+            ## The easiest way to do this is to get the OID symlinks from the already
+            ## extracted base.tar file, pass it down to _restore_tablespace which
+            ## does all the remaining leg work.
+
+            local tblspc_oid=$(ls "$dn/pg_tblspc")
+            for i in $tblspc_oid; do
+                _restore_tablespace "$i" "$dn"
+            done
+
+            ;;
+        basebackup_*.tar*)
+            # Unpack TAR archive into destination directory
+            tar --force-local -C "$dn" -x -z -f "$fn" && echo "successfully restored \"$fn\""
+            ;;
+        *)
+            error "Unknown basebackup: \"$fn\""
+            ;;
+    esac
 
     # create pg_xlog/archive_status directory (newer PostgreSQL
     # releases will do this automatically, but it doesn't no harm
-    # if done here...
+    # if done here...)
     mkdir -p "$dn"/pg_xlog/archive_status
 
     ## place the recovery.conf
@@ -470,6 +563,64 @@ do_restore_basebackup() {
 
     [ $status -eq 0 ] || [ $status -eq 1 ]
 
+}
+
+##
+## Restores a tablespace belonging to a specific
+## base backup. The base backup files are required to be
+## restored previously, so this function is intended
+## to be called by do_restore_basebackup() only.
+##
+## Arguments required are:
+## $1: Tablespace OID
+## $2: PGDATA directory
+##
+_restore_tablespace() {
+
+    local tblspc_oid="$1"
+    local dn="$2"
+    local lnk=""
+    local adj_symlink;
+
+    case "$1" in
+        [0-9]*)
+
+            ## Get the link directory, but honor an eventually specified
+            ## -T option; In this case we replace all tablespace target
+            ## directories with the directory provided by -T...
+            if [ -z "$pgtblspc_replace_dir" ]; then
+                lnk=$(readlink "$dn"/pg_tblspc/"$tblspc_oid")
+            else
+                lnk="$pgtblspc_replace_dir/$tblspc_oid"
+                mkdir -p "$lnk"
+                adj_symlink=1
+            fi
+
+            ## link target directory exists?
+            if [ -d "$lnk" ]; then
+
+                ## target directory empty?
+                if [ $(ls "$lnk" | wc -l) -gt 0 ]; then
+                    error "directory \"$lnk\" for tablespace OID \"$tblspc_oid\" not empty"
+                fi
+
+                tar --force-local -C "$lnk" -x -z -f "$fn"/"$tblspc_oid".tar.gz && echo "successfully restored tablespace ${tblspc_oid}.tar.gz"
+                ## In case we have a -T option to replace tablespace directories,
+                ## we need to adjust the symlinks located in PGDATA/pg_tblspc
+                ## as well...
+                if [ ! -z "$adj_symlink" ]; then
+                    echo Adjusting symlink "$dn"/pg_tblspc/"$tblspc_oid" to "$lnk"
+                    ln -sf -t "$dn"/pg_tblspc/ "$lnk"
+                fi
+
+            else
+                error "directory \"$lnk\" for tablespace OID \"$tblspc_oid\" does not exist"
+            fi
+            ;;
+        *)
+            error "restore tablespace \"$tblspc_oid\": not a valid OID"
+            ;;
+    esac
 }
 
 ##
@@ -616,13 +767,23 @@ do_cleanup() {
 
     local fn=$(basename "$1")
     case $fn in
+        streaming_backup_*)
+            first_wal=$(gunzip -c -f "$1/base.tar.gz" | tar -f - -x -O backup_label | start_wal_location)
+            ;;
         basebackup_*.tar*)
             first_wal=$(gunzip -c -f "$1" | tar -f - -x -O ./backup_label | start_wal_location)
             ;;
-        [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup*)
+        [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup)
+            first_wal=$(cat "$archivedir/log/$1" | start_wal_location)
+            last_wal=$(cat "$archivedir/log/$1" | stop_wal_location)
+            if [ ! -f "$archivedir"/log/$last_wal ]; then
+                error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
+            fi
+            ;;
+        [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup.gz)
             first_wal=$(gunzip -c -f "$1" | start_wal_location)
             last_wal=$(gunzip -c -f "$1" | stop_wal_location)
-            if [ ! -f "$archivedir"/log/$last_wal* ]; then
+            if [ ! -f "$archivedir"/log/"$last_wal.gz" ]; then
                 error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
             fi
             ;;
@@ -642,7 +803,10 @@ do_cleanup() {
             ;;
 	+[1-9]*)
 	    local retention_policy=$1
-	    local base_backups=$(ls -tr "$archivedir"/base/basebackup_*.tar*)
+
+            ## NOTE: We need to consider both, traditional tar files and
+            ## streamed backups here.
+	    local base_backups=$(ls -tdr "$archivedir"/base/*backup_* 2>/dev/null)
 	    local num_backups=$(echo "$base_backups" | wc -l)
 
 	    if [ $num_backups -le $retention_policy ]; then
@@ -667,13 +831,13 @@ do_cleanup() {
 		## base backup.
                 ##
                 ## XXX: Currently we are performing the cleanup based on selecting
-                ##      the base backup files from $archivedir/base. In the
-                ##      future, we might change this code to select the base
+                ##      the base backup files and directories from $archivedir/base.
+                ##      In the future, we might change this code to select the base
                 ##      backups according to the backup history files found there.
 		do_cleanup $oldest_keep
 
 		for i in $candidates; do
-		    rm "$i"
+		    rm -r "$i"
 		done
 	    fi
 
@@ -694,7 +858,7 @@ do_cleanup() {
         if [ "$cleanup_move" = yes ]; then
             tar --force-local -c -z -f "$archivedir"/base/oldwals-$(timestamp).tar.gz $old_files
         fi
-        rm -f $old_files
+        rm -rf $old_files
         )
     fi
 }
@@ -703,6 +867,33 @@ backup_label() {
     sed -n -e '/^LABEL:/s/^LABEL://;s/^\s//p'
 }
 
+## Returns the size of the specified file or directory
+##
+## In case the specified file does not exist, 0 is returned
+_get_size() {
+
+    local fn="$1"
+    local basesize=0
+
+    if [ -e "$fn" ]; then
+        basesize=$(du -sh "$fn" | awk '{print $1;}')
+    else
+        basesize="N/A"
+    fi
+
+    echo -n $basesize
+}
+
+##
+## do_ls()
+##
+## Accepts an argument literal '+' to make the output more verbose.
+## This verbose output also verifies wether the required WAL files
+## for a specific base backup are still present or not. Since the
+## verbose output calculates these information according to the
+## existing backup history files, we should protect any calls
+## to do_ls '+' with an filesystem lock...see the function 
+## run_with_lock() for details.
 do_ls() {
 
     local backups basesize wallogsize walcount
@@ -710,9 +901,9 @@ do_ls() {
     backups=$(ls -t $archivedir/log/[0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup* 2> /dev/null || return 0)
 
     if [ -z "$1" ]; then
-        printf "%-71s\t%-9s\n" "Basebackup Filename" "Size"
+        printf "%-51s\t%-9s\n" "Basebackup Filename" "Size"
     else
-        printf "%-53s\t%s\t%-24s\t%-3s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
+        printf "%-33s\t%s\t%-24s %-3s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
     fi
 
     echo $hdrline
@@ -725,14 +916,15 @@ do_ls() {
 
             basebackup_*.tar.gz)
                 fn="$(basename $fn)"
-                basesize=$(du -sh "$archivedir/base/$fn" | awk '{print $1;}')
+                basesize=$(_get_size "$archivedir/base/$fn")
                 ;;
             *SNAPSHOT*)
                 basesize=0
                 ;;
-            base/streaming_backup*)
+            streaming_backup*)
                 # This is an archive directory containing a streaming base backup
-                basesize=$(du -sh "$fn" | awk '{print $1;}')
+                fn="$(basename $fn)"
+                basesize=$(_get_size "$archivedir/base/$fn")
                 ;;
             [0-9]*)
                 echo "$x: Label \"$fn\" is not an expected basebackup filename"
@@ -742,7 +934,7 @@ do_ls() {
         esac
 
         if [ -z "$1" ]; then
-            printf "%-71s\t%-9s\n" "$fn" $basesize
+            printf "%-51s\t%-9s\n" "$fn" $basesize
         elif [ "$1" = "+" ]; then
 
             local wal_avail='YES'
@@ -751,7 +943,7 @@ do_ls() {
             first_wal=$(cat "$x" | gunzip -c -f | start_wal_location)
 
             (test -f "$archivedir/log/$first_wal" || test -f "$archivedir/log/$first_wal.gz") || export wal_avail='NO'
-            printf "%-53s\t%s\t%-24s\t%-3s\n" "$fn" $basesize $first_wal $wal_avail
+            printf "%-33s\t%s\t%-24s %-3s\n" "$fn" $basesize $first_wal $wal_avail
         fi
     done
 
@@ -768,30 +960,42 @@ case $mode in
     help)
 	print_help;;
     setup)
+        check_psql_dep
 	check_archivedir
 	check_datadir
         do_setup;;
     currentbackup)
+        check_psql_dep
         check_rsync_dep
 	check_archivedir current
 	check_datadir
         run_with_lock do_currentbackup
         ;;
+    streambackup)
+        check_psql_dep
+        check_pg_basebackup_dep
+        check_archivedir
+        run_with_lock do_streambackup
+        ;;
     basebackup)
+        check_psql_dep
 	check_archivedir
 	check_datadir
         run_with_lock do_basebackup
         ;;
     lvmbasebackup)
+        check_psql_dep
 	check_archivedir lvm_snapshot
 	check_datadir
         run_with_lock do_lvmbasebackup
         ;;
     create-lvmsnapshot)
+        check_psql_dep
 	check_archivedir lvm_snapshot
         run_with_lock do_create-lvmsnapshot
         ;;
     remove-lvmsnapshot)
+        # NOTE: doesn't require psql, only remove the LVM snapshot via lvremove
 	check_archivedir lvm_snapshot
         run_with_lock do_remove-lvmsnapshot
         ;;
