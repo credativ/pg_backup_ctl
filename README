@@ -259,9 +259,9 @@ Older distributions doesn't have the flock command line tool, but it's
 possible to just comment out the locking subscripts.
 
 The basebackup command currently doesn't support tablespaces. Use streaming
-base backups instead, which has full support for tablespaces.
-
-The -T option is supported on PostgreSQL >= 9.2 only.
+base backups instead, which has full support for tablespaces. This requires
+PostgreSQL 9.1 and above since the pg_basebackup tool is not available in
+older releases.
 
 If you restore a streaming base backup with tablespaces, you should be aware that
 the default operation mode restores the tablespace into the original directories.

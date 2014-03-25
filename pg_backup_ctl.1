@@ -57,6 +57,15 @@ Create an LVM snapshot for an external backup command like bacula.
 (Requires \fB-L\fR, \fB-M\fR, -\fBn\fR, \fB-N\fR)
 .RE
 
+\fBstreambackup\FR
+.RS 4
+perform a streaming basebackup.
+
+This command requires PostgreSQL 9.1 and above and pg_basebackup
+accessible via PATH. The server should be configured to allow
+streaming replication connections.
+.RE
+
 \fBremove-lvmsnapshot\fR
 .RS 4
 Remove an LVM snapshot created with create-lvmsnapshot.
@@ -109,6 +118,13 @@ Directory with will contain the backup-files. This parameter is required at all 
 \fB-D\fR \fIdatadir\fR
 .RS 4
 PostgresSQL data directory. If PostgreSQL is running this parameter isn't used and will come from PostgreSQL running_configuration.
+
+.RE
+\fB-T\fR \fITABLESPACE\fR
+.RS 4
+Target directory for tablespace location during restore
+(replaces the original symlinks in the base backup, but places
+all tablespaces into one directory).
 
 .RE
 \fB-m\fR

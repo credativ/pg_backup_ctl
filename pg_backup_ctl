@@ -51,23 +51,7 @@ Supports PostgreSQL 8.3 and above
 Usage: $me -A ARCHIVEDIR [OPTION...] MODE
 
 Modes:
-  setup          prepare server for transaction log archival
   basebackup     perform a base backup
-  lvmbasebackup  perform a base backup using LVM snapshot
-                 (requires -L -M -n -N)
-  create-lvmsnapshot
-                 create an LVM snapshot for an external backup command
-                 (requires -L -M -n -N)
-  remove-lvmsnapshot
-                 remove an LVM snapshot created with create-lvmsnapshot
-  restore BASEBACKUP
-                 Restores the specified basebackup into the specified
-                 directory by the -D parameter. 
-                 The directory must already exist and be empty.
-                 The destination directory will also contain a generated
-                 recovery.conf, suitable to start a PostgreSQL instance for
-                 recovery immediately.
-  currentbackup  backup the current WAL file (run from cron job)
   cleanup [ FILENAME | XLOG | +[1-9]* ]
                  remove old WAL files after new base backup (run from cron job)
 
@@ -83,10 +67,39 @@ Modes:
                  If no argument is specified, cleanup will remove all WAL
                  files except those which are required by the latest base
                  backup.
+
+  create-lvmsnapshot
+                 create an LVM snapshot for an external backup command
+                 (requires -L -M -n -N)
+
+  currentbackup  backup the current WAL file (run from cron job)
+
   ls[+]          Lists available base backups and their size in the current archive.
                  When issued with +, the ls command will examine the WAL archive
                  and the minimum WAL segment file, required to use the backup
                  to perform a full recovery.
+
+  lvmbasebackup  perform a base backup using LVM snapshot
+                 (requires -L -M -n -N)
+
+  setup          prepare server for transaction log archival
+
+  streambackup   perform a streaming basebackup.
+
+                 This command requires PostgreSQL 9.1 and above and pg_basebackup
+                 accessible via PATH. The server should be configured to allow
+                 streaming replication connections.
+
+  remove-lvmsnapshot
+                 remove an LVM snapshot created with create-lvmsnapshot
+
+  restore BASEBACKUP
+                 Restores the specified basebackup into the specified
+                 directory by the -D parameter. 
+                 The directory must already exist and be empty.
+                 The destination directory will also contain a generated
+                 recovery.conf, suitable to start a PostgreSQL instance for
+                 recovery immediately.
 
 Options:
   -A ARCHIVEDIR archival target directory (required)
@@ -173,7 +186,7 @@ check_psql_dep() {
 check_pg_basebackup_dep() {
     # check if pg_basebackup can be found somewhere
     if ! command -v pg_basebackup >/dev/null; then
-        error "cannot find pg_basebackup executable"
+        error "cannot find pg_basebackup executable (requires PostgreSQL >= 9.1)"
     fi
 }
 
@@ -222,39 +235,6 @@ get_pg_major_version() {
     local PGMAJOR=$(cat "$datadir"/PG_VERSION | awk -F'.' '{print $1$2;}')
     echo $PGMAJOR
 
-}
-
-##
-## Returns the PostgreSQL major version found in the specified base backup.
-##
-get_backup_pg_major_version() {
-
-    local bf="$1"
-    local basebackup=""
-
-    ## backup file exists?
-    case $bf in
-
-        streaming_backup*)
-
-            basebackup="$archivedir"/base/"$bf"/base.tar.gz
-            ;;
-
-        basebackup*)
-
-            basebackup="$archivedir"/base/"$bf"
-            ;;
-
-        *)
-            error "unknown base backup format \"$bf\""
-            ;;
-    esac
-
-    if [ ! -f "$basebackup" ]; then
-        echo 0
-    fi
-
-    echo $(LC_ALL=C tar -xzf $basebackup -O global/pg_control | pg_controldata | grep "pg_control version number" | awk -F '[ ]{12}' '{print substr($2, 1, 2);}')
 }
 
 ## Checks the specified archive directory (-A)
@@ -516,18 +496,6 @@ do_restore_basebackup() {
     case "$(basename ${fn})" in
         streaming_backup*)
 
-            ## Check if we have a PostgreSQL Major release and the -T option
-            ## specified. We need to error out in case we deal with a major
-            ## version < 9.2, since the pg_tablespace shared catalog has the
-            ## tablespace directories stored for pg_dump.
-            ## We might relax this, since it's easy to adjust it manually, but
-            ## i usually don't recommend with fooling around with system
-            ## catalogs directly. So follow this route and don't encourage
-            ## people to do stupid things ;)
-            if [ $(get_backup_pg_major_version "$(basename ${fn})") -lt 92 ] && [ ! -z "$pgtblspc_replace_dir" ]; then
-                error "-T is supported for PostgreSQL >= 9.2 only"
-            fi
-
             echo "restoring base archive"
             tar --force-local -C "$dn" -x -z -f "$fn"/base.tar.gz && echo "successfully restored base.tar.gz"
             echo "checking for tablespaces"
@@ -580,7 +548,7 @@ _restore_tablespace() {
     local tblspc_oid="$1"
     local dn="$2"
     local lnk=""
-    local adj_symlink;
+    local adj_symlink
 
     case "$1" in
         [0-9]*)
@@ -609,8 +577,18 @@ _restore_tablespace() {
                 ## we need to adjust the symlinks located in PGDATA/pg_tblspc
                 ## as well...
                 if [ ! -z "$adj_symlink" ]; then
+                    local pg_major_ver
                     echo Adjusting symlink "$dn"/pg_tblspc/"$tblspc_oid" to "$lnk"
                     ln -sf -t "$dn"/pg_tblspc/ "$lnk"
+
+                    pg_major_ver=$(get_pg_major_version "$dn")
+                    if [ $pg_major_ver -lt 92 ]; then
+                        echo "Adjusted tablespace; be sure to adjust pg_tablespace"
+                        echo "You must update the location of tablespace OID \"tblspc_oid\":"
+                        echo ""
+                        echo "UPDATE pg_tablespace SET spclocation='$lnk' WHERE oid = $tblspc_oid"
+                        echo ""
+                    fi
                 fi
 
             else
