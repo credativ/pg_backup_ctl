@@ -1,0 +1,161 @@
+#!/bin/bash
+# testsuite for pg_backup_ctl
+# Version 0.1
+export LANG=C
+initdb="/usr/lib/postgresql/9.3/bin/initdb"
+pg_ctl="/usr/lib/postgresql/9.3/bin/pg_ctl"
+testdir="/var/tmp/test_pg_backup_ctl"
+databasedir="$testdir/db"
+archivedir="$testdir/archive"
+port="6543"
+pg_backup_ctl="$(pwd)/pg_backup_ctl -p $port"
+startdb="$pg_ctl -D $databasedir -l $testdir/log.log -w -o '-p$port' start"
+stopdb="$pg_ctl -D $databasedir -w stop"
+restartdb="$pg_ctl -D $databasedir -w restart"
+me=$(basename $0)
+
+#usage
+echo "1. Set your conifg in $me"
+echo "2. ./$me"
+echo ""
+echo "config"
+echo "initdb: $initdb"
+echo "pg_ctl: $pg_ctl"
+echo "testdir: $testdir"
+echo "databasedir: $databasedir"
+echo "archivedir: $archivedir"
+echo "port: $port"
+echo "pg_backup_ctl: $pg_backup_ctl"
+
+function fail {
+	echo "FAILED"
+	exit -1
+}
+
+#become postgres
+if [ "$(whoami)" != "postgres" ]; then
+	echo "run as user postgres"
+	echo "sudo -u postgres $(pwd)/$me"
+	fail
+fi
+
+#stopdb (if running)
+echo "try to stop db"
+echo $stopdb
+$stopdb
+
+#make dirs and stuff
+echo "creating dirs"
+mkdir $testdir
+mkdir $databasedir
+mkdir $archivedir
+
+#clean
+echo "clean dirs"
+rm -rf $databasedir/*
+rm -rf $archivedir/*
+
+#cd
+cd $testdir
+
+#initdb
+echo "initdb"
+$initdb -D $databasedir
+
+#startdb
+echo "local	replication	postgres	trust" >> $databasedir/pg_hba.conf
+echo "wal_level=archive" >> $databasedir/postgresql.conf
+echo "max_wal_senders = 1" >> $databasedir/postgresql.conf
+echo "start postgres"
+echo $startdb
+$startdb
+
+
+#setup
+#./pg_backup_ctl -A /var/lib/postgresql/archive setup
+setup="$pg_backup_ctl -A $archivedir setup"
+echo $setup
+$setup
+echo $restartdb
+$restartdb
+
+#fill
+#fill="pgbench -p$port -i"
+#echo $fill
+#$fill
+
+# create testdb
+psql -p$port -c "
+CREATE SEQUENCE serial START 1;
+CREATE TABLE test1 (
+    id integer NOT NULL DEFAULT nextval('serial'),
+    text character varying(100) NOT NULL UNIQUE
+);
+insert into test1 VALUES (DEFAULT,'init' );"
+
+#basebackup
+#./pg_backup_ctl -A /var/lib/postgresql/archive/ basebackup
+basebackup="$pg_backup_ctl -A $archivedir basebackup"
+echo $basebackup
+$basebackup
+
+# insert
+psql -p$port -c "insert into test1 VALUES (DEFAULT,'insert 1' );"
+
+#streambackup
+#./pg_backup_ctl streambackup -A /var/lib/postgresql/archive
+streambackup="$pg_backup_ctl -A $archivedir streambackup"
+echo $streambackup
+$streambackup
+
+#insert
+psql -p$port -c "insert into test1 VALUES (DEFAULT,'insert 2' );"
+
+#show backups (ls)
+#./pg_backup_ctl -A /var/lib/postgresql/archive/ ls+
+showbackups="$pg_backup_ctl -A $archivedir ls+"
+echo $showbackups
+$showbackups
+
+#stop
+$stopdb
+
+#destroy server data
+rm -rf $databasedir/*
+
+#restore
+backupname=$(ls -rt $archivedir/base/ | grep streaming | tail --lines=1)
+restorebackup="$pg_backup_ctl -A $archivedir -D $databasedir restore
+$backupname"
+echo $restorebackup
+$restorebackup
+
+#startdb
+echo $startdb
+$startdb
+
+#test
+count=$(psql -p$port -t -c "select text from test1;")
+echo $count
+
+if psql -p6543 -t -c "select text from test1;" | grep -q "init" &&
+   psql -p6543 -t -c "select text from test1;" | grep -q "insert 1" &&
+   psql -p6543 -t -c "select text from test1;" | grep -q "insert 2"; then
+	passed=true
+else
+	passed=false
+fi
+
+#stopdb (if running)
+echo "try to stop db"
+echo $stopdb
+$stopdb
+
+if [ $passed == true  ]; then
+	echo "PASSED"
+    exit 0
+else
+	fail
+fi
+
+

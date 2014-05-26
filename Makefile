@@ -29,4 +29,8 @@ clean:
 	rm -rf ${PROJECT}-${PG_BACKUP_CTL_VERSION}
 	rm -f ${PROJECT}-${PG_BACKUP_CTL_VERSION}.tar.bz2
 
+check:
+	# edit testsuite to change psql version ect.
+	sudo -u postgres ./testsuite
+
 .PHONY: distribution
