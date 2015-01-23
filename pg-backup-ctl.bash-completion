@@ -17,7 +17,7 @@ _pg_backup_ctl()
     done
 
     # supported tasks
-    tasks="setup basebackup lvmbasebackup create-lvmsnapshot \
+    tasks="setup basebackup lvmbasebackup streambackup create-lvmsnapshot \
             remove-lvmsnapshot restore currentbackup cleanup ls ls+"
 
     # options
