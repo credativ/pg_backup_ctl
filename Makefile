@@ -1,7 +1,7 @@
 PROJECT = pg_backup_ctl
 PG_BACKUP_CTL_VERSION = 0.7
 
-FILES = Makefile pg_backup_ctl pg_backup_ctl.1 README
+FILES = Makefile pg_backup_ctl pg_backup_ctl.1 README debian/pg-backup-ctl.bash-completion
 PREFIX = /usr
 
 all:

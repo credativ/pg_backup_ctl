@@ -28,6 +28,8 @@ install -d %{buildroot}/%{_bindir}/
 install -d %{buildroot}/%{_docdir}/%{toolname}
 install -m 0755 pg_backup_ctl %{buildroot}/%{_bindir}/
 install -m 644  README        %{buildroot}%{_docdir}/%{toolname}/
+install -d %{buildroot}%{_sysconfdir}/bash_completion.d/
+install -m 644  pg-backup-ctl.bash-completion %{buildroot}%{_sysconfdir}/bash_completion.d/
 
 %clean
 rm -rf %{buildroot}
@@ -41,6 +43,7 @@ rm -rf %{buildroot}
 %defattr(-,root,root,-)
 %{_bindir}/pg_backup_ctl
 %{_docdir}/%{toolname}/README
+%{_sysconfdir}/bash_completion.d/
 
 %changelog
 * Fri Jan 23 2015 Bernd Helmle <bernd.helmle@credativ.de>
