@@ -614,9 +614,9 @@ _gen_recovery_conf() {
     local cmd=""
 
     if [ "$gzip" = yes ]; then
-        cmd="gzip -d -c \\'$archivedir/log/%f.gz\\' > \\'%p\\'"
+        cmd="gzip -d -c \"$archivedir/log/%f.gz\" > \"%p\""
     else
-        cmd="cp \\'$archivedir/log/%f\\'  \\'%p\\'"
+        cmd="cp \"$archivedir/log/%f\"  \"%p\""
     fi
 
     echo "restore_command='$cmd'" > "$dn"/recovery.conf
