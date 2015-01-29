@@ -10,8 +10,7 @@ Group:   Applications/Databases
 URL:     http://www.credativ.de
 Source0: %{toolname}-%{version}.tar.bz2
 BuildRoot: %{_tmppath}/%{toolname}-%{version}-%{release}-root-%(%{__id_u} -n)
-BuildRequires: postgresql-devel >= 8.4
-Requires: postgresql >= 8.4
+Requires: postgresql >= 8.3
 Conflicts: pg_backup_ctl <= 0.1
 
 %description
