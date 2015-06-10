@@ -43,6 +43,24 @@ hdrline=$(printf "%080d"|tr "0" "-")
 PG_BACKUP_LOCK_TIMEOUT=60
 LOCK=""
 
+## If operating on non-Linux, make sure the GNU tools are used
+## On Solaris, they're usually available via the 'g' prefix...
+
+if echo "$OSTYPE" | grep darwin > /dev/null || echo "$OSTYPE" | grep solaris > /dev/null;
+then
+    SED="gsed"
+    GREP="ggrep"
+    FIND="gfind"
+    TAR="gtar"
+    TAIL="gtail"
+else
+    SED="sed"
+    GREP="grep"
+    FIND="find"
+    TAR="tar"
+    TAIL="tail"
+fi
+
 print_help() {
 	cat <<EOF
 PostgreSQL transaction log archival backup control program
@@ -201,25 +219,52 @@ check_rsync_dep() {
 ## Runs a command within a exclusive locking. This functions is required to run
 ## a command only once at a time.
 ##
-run_with_lock() {
-    set +e  # disable immediate exit on errors for this function
-
+run_with_lock()
+{
     local rc command="$*"
-    (
-        flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
-        rc=$?
 
-        # check if the lock was aquired
-        if [ $rc -eq 0 ]; then
-            $command
+    ## Special handling for non-Linux systems.
+    ## We use mkdir instead if the flock() API for
+    ## locking, since flock is not avaiable e.g on
+    ## OSX and Solaris.
+
+    if echo "$OSTYPE" | grep darwin > /dev/null || echo "$OSTYPE" | grep solaris > /dev/null;
+    then
+        local PROG=$( basename $0 )
+
+        if mkdir "$LOCK" >/dev/null 2>&1
+        then
+            trap "rmdir '$LOCK'" 0 2 3 15
+            chmod 0 "$LOCK" # discourage anyone from messing with it else the rmdir might fail
         else
-            error "failed to run \"$command\" could not aquire exclusive lock
-            $LOCK"
+            echo >&2 "Lock ($LOCK) exists. exiting"
+            exit 1
         fi
 
-    ) 284>$LOCK
+        ## run the command
+        $command
 
-    set -e
+        ## ..and we're done
+        ## rmdir "$LOCK"
+    else
+        set +e  # disable immediate exit on errors for flock()
+
+        (
+            flock -x -w $PG_BACKUP_LOCK_TIMEOUT 284
+            rc=$?
+
+            # check if the lock was aquired
+            if [ $rc -eq 0 ]; then
+                $command
+            else
+                error "failed to run \"$command\" could not aquire exclusive lock
+            $LOCK"
+            fi
+
+        ) 284>$LOCK
+
+        set -e
+    fi
 }
 
 ##
@@ -326,8 +371,8 @@ do_setup() {
     fi
     local cf=$(current_setting config_file)
 
-    if grep -q archive_command "$cf"; then
-        sed -i -e "/archive_command/ c archive_command = '$cmd'" "$cf"
+    if $GREP -q archive_command "$cf"; then
+        $SED -i -e "/archive_command/ c archive_command = '$cmd'" "$cf"
     else
         (echo; echo "# automatically added by $me"; echo "archive_command = '$cmd'") >>$cf
         echo "Added archive_command to postgresql.conf"
@@ -337,9 +382,9 @@ do_setup() {
     ## user, if we changed anything here.
     local archivemode=$(current_setting archive_mode)
 
-    if grep -q archive_mode "$cf"; then
+    if $GREP -q archive_mode "$cf"; then
         if [ ! -z "$archivemode" ] && [ "$archivemode" = "off" ]; then
-            sed -i -e '/archive_mode/ c archive_mode = on' "$cf"
+            $SED -i -e '/archive_mode/ c archive_mode = on' "$cf"
             echo "HINT: activated archive_mode, you need to restart the server to get archiving activated"
         else
             echo "HINT: archive_mode already activated, adjusted archive_command only"
@@ -358,9 +403,9 @@ do_setup() {
     if [ $pg_major_version -ge 90 ]; then
         local wallevel=$(current_setting wal_level)
 
-        if grep -q wal_level "$cf"; then
+        if $GREP -q wal_level "$cf"; then
             if [ ! -z "$wallevel" ] && [ "$wallevel" != "archive" ] && [ "$wallevel" != "hot_standby" ]; then
-                sed -i -e '/wal_level/ c wal_level = archive' "$cf"
+                $SED -i -e '/wal_level/ c wal_level = archive' "$cf"
                 echo "HINT: set wal_level to 'archive', you need to restart the server to get this setting into effect"
             else
                 echo "HINT: wal_level already set to 'archive'"
@@ -387,7 +432,7 @@ do_currentbackup() {
     local files x y
 
     # identify unarchived files
-    for x in $(ls -r "$datadir"/pg_xlog/ | egrep '^[0-9A-F]{24}$'); do
+    for x in $(ls -r "$datadir"/pg_xlog/ | $GREP -E '^[0-9A-F]{24}$'); do
         if [ ! -f "$datadir"/pg_xlog/archive_status/$x.done ]; then
             files="$files $x"
         fi
@@ -437,7 +482,7 @@ do_basebackup() {
 
     [ -f "$fn" ] && error "Basebackup $fn already exists"
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    tar --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' . || status=$?
+    $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' . || status=$?
 
     # NOTE: We don't want to see any NOTICE messages here, but error messages...
     PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
@@ -478,7 +523,7 @@ do_restore_basebackup() {
     fi
 
     # Target directory empty?
-    if [ "$(find "$dn" -type f | wc -l)" -gt 2 ]; then
+    if [ "$($FIND "$dn" -type f | wc -l)" -gt 2 ]; then
 	## does it contain a running PostgreSQL instance?
 	if [ -e "$dn"/PG_VERSION ]; then
 	    local ver=$(get_pg_major_version)
@@ -497,7 +542,7 @@ do_restore_basebackup() {
         streaming_backup*)
 
             echo "restoring base archive"
-            tar --force-local -C "$dn" -x -z -f "$fn"/base.tar.gz && echo "successfully restored base.tar.gz"
+            $TAR --force-local -C "$dn" -x -z -f "$fn"/base.tar.gz && echo "successfully restored base.tar.gz"
             echo "checking for tablespaces"
 
             ## Get all OIDs for tablespaces to be restored, call _restore_tablespace
@@ -514,7 +559,7 @@ do_restore_basebackup() {
             ;;
         basebackup_*.tar*)
             # Unpack TAR archive into destination directory
-            tar --force-local -C "$dn" -x -z -f "$fn" && echo "successfully restored \"$fn\""
+            $TAR --force-local -C "$dn" -x -z -f "$fn" && echo "successfully restored \"$fn\""
             ;;
         *)
             error "Unknown basebackup: \"$fn\""
@@ -572,7 +617,7 @@ _restore_tablespace() {
                     error "directory \"$lnk\" for tablespace OID \"$tblspc_oid\" not empty"
                 fi
 
-                tar --force-local -C "$lnk" -x -z -f "$fn"/"$tblspc_oid".tar.gz && echo "successfully restored tablespace ${tblspc_oid}.tar.gz"
+                $TAR --force-local -C "$lnk" -x -z -f "$fn"/"$tblspc_oid".tar.gz && echo "successfully restored tablespace ${tblspc_oid}.tar.gz"
                 ## In case we have a -T option to replace tablespace directories,
                 ## we need to adjust the symlinks located in PGDATA/pg_tblspc
                 ## as well...
@@ -693,7 +738,7 @@ do_create-lvmsnapshot() {
 
     ## do the backup, fall through all errors!
     if _create_snapshot_LVM "$fn"; then
-        tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir/" -c -z -f "$fn" ./backup_label || status=$?
+        $TAR --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir/" -c -z -f "$fn" ./backup_label || status=$?
     fi
 
     [ $status -eq 0 ] || [ $status -eq 1 ]
@@ -722,7 +767,7 @@ do_lvmbasebackup() {
     _create_snapshot_LVM "$fn" "$fn"
 
     ## do the backup, fall through all errors!
-    tar --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
+    $TAR --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
 
     ## unmount the snapshot
     _remove_snapshot_LVM || status=$?
@@ -731,12 +776,12 @@ do_lvmbasebackup() {
 }
 
 start_wal_location() {
-    sed -n -r '/^START WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
+    $SED -n -r '/^START WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
 }
 
 
 stop_wal_location() {
-    sed -n -r '/^STOP WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
+    $SED -n -r '/^STOP WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
 }
 
 
@@ -753,7 +798,7 @@ do_cleanup() {
             ## have any connection to an existing basebackup.
             ##
             if [ -e "$1/base.tar.gz" ]; then
-                first_wal=$(gunzip -c -f "$1/base.tar.gz" | tar -f - -x -O backup_label | start_wal_location)
+                first_wal=$(gunzip -c -f "$1/base.tar.gz" | $TAR -f - -x -O backup_label | start_wal_location)
             else
                 echo "Basebackup $1 does not exist, use cleanup <HISTORYFILE> to tidy up"
             fi
@@ -766,7 +811,7 @@ do_cleanup() {
             ## have any connection to an existing basebackup.
             ##
             if [ -e "$1" ]; then
-                first_wal=$(gunzip -c -f "$1" | tar -f - -x -O ./backup_label | start_wal_location)
+                first_wal=$(gunzip -c -f "$1" | $TAR -f - -x -O ./backup_label | start_wal_location)
             else
                 echo "Basebackup $1 does not exist, use cleanup <HISTORYFILE> to tidy up"
             fi
@@ -815,8 +860,8 @@ do_cleanup() {
 		local newest_candidate
 
 		candidates=$(echo "$base_backups" | head -n $(($num_backups - $retention_policy)))
-		oldest_keep=$(echo "$base_backups" | head -n $(($num_backups - $retention_policy + 1)) | tail -n1)
-		newest_candidate=$(echo "$candidates" | tail -n1)
+		oldest_keep=$(echo "$base_backups" | head -n $(($num_backups - $retention_policy + 1)) | $TAIL -n1)
+		newest_candidate=$(echo "$candidates" | $TAIL -n1)
 
 		## This recurses into cleanup and removes all WAL files
 		## belonging to the list of candidates. Those aren't required
@@ -850,11 +895,11 @@ do_cleanup() {
     esac
 
     if [ -f "$archivedir"/log/$first_wal ] || [ -f "$archivedir"/log/$first_wal.gz ]; then
-        local old_files=$(ls "$archivedir"/log | sed -n "/$first_wal/q;p")
+        local old_files=$(ls "$archivedir"/log | $SED -n "/$first_wal/q;p")
         (
         cd "$archivedir"/log
         if [ "$cleanup_move" = yes ]; then
-            tar --force-local -c -z -f "$archivedir"/base/oldwals-$(timestamp).tar.gz $old_files
+            $TAR --force-local -c -z -f "$archivedir"/base/oldwals-$(timestamp).tar.gz $old_files
         fi
         rm -rf $old_files
         )
@@ -862,7 +907,7 @@ do_cleanup() {
 }
 
 backup_label() {
-    sed -n -e '/^LABEL:/s/^LABEL://;s/^\s//p'
+    $SED -n -e '/^LABEL:/s/^LABEL://;s/^\s//p'
 }
 
 ## Returns the size of the specified file or directory
@@ -948,7 +993,7 @@ do_ls() {
 
     ## sum up archive log size
     wallogsize=$(du -sh "$archivedir/log/" | awk '{print $1;}')
-    walcount=$(ls -1 "$archivedir/log/" | egrep '^[0-9A-Z]{24}\.?[gz]*$' | wc -l)
+    walcount=$(ls -1 "$archivedir/log/" | $GREP -E '^[0-9A-Z]{24}\.?[gz]*$' | wc -l)
     echo $hdrline
     printf "Total size occupied by %d WAL segments in archive: %-9s\n" $walcount $wallogsize
 }
