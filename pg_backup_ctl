@@ -75,9 +75,9 @@ Modes:
 
                  It is possible to specify the base backup filename FILENAME,
                  which WAL files should be kept at least or the WAL file XLOG.
-                 If a positiv number greater than zero is specified, the cleanup
-                 command will treat it as its retention policy and keep at
-                 least this number of base backup files. Please note that the
+                 If a positive number greater than zero is specified, the
+                 cleanup command will treat it as its retention policy and keep
+                 at least this number of base backup files. Please note that the
                  latter form of the cleanup command will delete all outdated
                  base backups as well whereas the two forms of cleanup invoked
                  with filenames will delete the WAL files only.
