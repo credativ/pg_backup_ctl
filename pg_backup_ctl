@@ -496,7 +496,7 @@ do_basebackup() {
 
     [ -f "$fn" ] && error "Basebackup $fn already exists"
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' . || status=$?
+    $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' ./backup_label . || status=$?
 
     # NOTE: We don't want to see any NOTICE messages here, but error messages...
     PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
@@ -812,7 +812,7 @@ do_cleanup() {
             ## have any connection to an existing basebackup.
             ##
             if [ -e "$1/base.tar.gz" ]; then
-                first_wal=$(gunzip -c -f "$1/base.tar.gz" | $TAR -f - -x -O backup_label | start_wal_location)
+                first_wal=$(gunzip -c -f "$1/base.tar.gz" | $TAR -f - -x --occurence=1 -O ./backup_label | start_wal_location)
             else
                 echo "Basebackup $1 does not exist, use cleanup <HISTORYFILE> to tidy up"
             fi
@@ -825,7 +825,7 @@ do_cleanup() {
             ## have any connection to an existing basebackup.
             ##
             if [ -e "$1" ]; then
-                first_wal=$(gunzip -c -f "$1" | $TAR -f - -x -O ./backup_label | start_wal_location)
+                first_wal=$(gunzip -c -f "$1" | $TAR -f - -x --occurrence=1 -O ./backup_label | start_wal_location)
             else
                 echo "Basebackup $1 does not exist, use cleanup <HISTORYFILE> to tidy up"
             fi
