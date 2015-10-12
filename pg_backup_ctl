@@ -99,6 +99,13 @@ Modes:
 
   lvmbasebackup  perform a base backup using LVM snapshot
                  (requires -L -M -n -N)
+  rsyncbackup
+                 Perform a basebackup with rsync. This also saves backup space
+                 in case multiple rsync basebackups are used by hardlinking
+                 unchanged files. If a retention policy > 1 is used, then
+                 unchanged files are just allocated once in the base backup
+                 repository. See the --link-dest parameter in the rsync
+                 documentation for details.
 
   setup          prepare server for transaction log archival
 
@@ -152,8 +159,8 @@ set -- $(getopt A:D:h:l:L:M:mn:N:o:p:U:T:z "$@")
 
 while :; do
     case $1 in
-        -A) archivedir=$2; shift;;
-        -D) datadir=$2; shift;;
+        -A) archivedir=$(readlink -f $2); shift;;
+        -D) datadir=$(readlink -f $2); shift;;
         -h) export PGHOST=$2; shift;;
         -l) LOCK=$2; shift;;
 	-L) lvm_size=$2; shift;;
@@ -161,10 +168,10 @@ while :; do
 	-M) lvm_vol=$2; shift;;
         -m) cleanup_move=yes;;
 	-n) lvm_snap_name=$2; shift;;
-	-N) lvmdatadir=$2; shift;;
+	-N) lvmdatadir=$(readlink -f $2); shift;;
         -o) mountopts=$2; shift;;
         -p) export PGPORT=$2; shift;;
-        -T) pgtblspc_replace_dir=$2; shift;;
+        -T) pgtblspc_replace_dir=$(readlink -f $2); shift;;
         -U) export PGUSER=$2; shift;;
         -z) gzip=yes;;
         --) shift; break;;
@@ -179,8 +186,12 @@ shift
 
 # functions
 
+warn() {
+    echo "$me WARNIGN:" "$@" 1>&2
+}
+
 error() {
-    echo "$me:" "$@" 1>&2
+    echo "$me ERROR:" "$@" 1>&2
     exit 1
 }
 
@@ -360,7 +371,7 @@ check_lvm_params() {
 do_setup() {
 
     if [ $(ls "$datadir"/pg_tblspc | wc -l) -gt 0 ]; then
-        error "clusters uses tablespaces, this is not supported by $me"
+        warn "clusters uses tablespaces, this is not supported by basebackup and lvm snapshot commands"
     fi
 
     local cmd
@@ -479,6 +490,102 @@ do_streambackup() {
     fi
 }
 
+_get_last_rsync_backup() {
+
+    local last_one="$(ls -td1 $archivedir/base/rsync_backup* 2> /dev/null | head -n1)"
+    echo "$last_one"
+
+}
+
+do_rsync_basebackup() {
+
+    local status=0
+    local ts="$(timestamp)"
+
+    local tmpfn="$archivedir/base/.rsync_backup_$ts.in-progress"
+    local fn="$archivedir/base/rsync_backup_$ts"
+    local last_one=$(_get_last_rsync_backup)
+    local rsync_cmd="rsync -a --delete"
+    local rsync_cmd_tblspc="$rsync_cmd"
+    local tblspc_oids=""
+
+    ##
+    ## XXX: Take care for trap here, since run_with_lock() might already have
+    ##      installed it's cleanup code to remove the lock file for non-Linux
+    ##      platforms. We must not overwrite its cleanup action, so make
+    ##      sure to keep it.
+    ##
+    trap "rm -rf $tmpfn && rmdir '$LOCK' > /dev/null 2>&1" INT TRAP QUIT ABRT TERM EXIT # clean up on error
+
+    [ -d "$fn" ] && error "rsync basebackup $fn already exists"
+
+    ## Check if we have an old backup, which can be used to
+    ## use --link-dest of rsync. That will save at least transmits
+    ## for relfilenodes which haven't changed since.
+    ##
+    ## rsync will hardlink all unchanged relfilenodes.
+    if [ ! -d "$last_one" ] || [ -z "$last_one" ]; then
+        echo "no previous rsync backup found, need to rsync all files"
+    else
+       echo "using backup \"$last_one\" to hardlink unchanged files"
+       rsync_cmd="$rsync_cmd --link-dest=$last_one"
+       rsync_cmd_tblspc="$rsync_cmd_tblspc --link-dest=$last_one/.rsync_tblspc_backup"
+    fi
+
+    psql -c "SELECT pg_start_backup('$fn');" >/dev/null
+    $rsync_cmd "$datadir/" "$tmpfn/"
+
+    ## The basebackup for PGDATA should be completed now, we need to
+    ## check if there are any remaining tablespaces to be synced. We do
+    ## this by just examining the contents of the current basebackup/pg_tblspc
+    ## and check for any OIDs present. So the overall sync method for
+    ## any tablespaces found is:
+    ##
+    ## - Create a special directory in $tmpfn, .rsync_tblspc_backup,
+    ##   we assume this directory to be always present.
+    ## - Check OID symlinks in $tmpfn/pg_tblspc
+    ##   We use the already synced base backup to check existing
+    ##   tablespace locations.
+    ## - For any symlink, loop and sync the tablespace location into
+    ##   $tmpfn/.rsync_tblspc_backup/<OID>
+    ## - lather, rinse, repeat
+    tblspc_oids=$(ls "$tmpfn"/pg_tblspc)
+
+    ## Create the private directory to hold tablespace relfilenodes
+    mkdir "$tmpfn"/.rsync_tblspc_backup 2>/dev/null || error "could not create directory for tablespace backups"
+
+    for i in $tblspc_oids; do
+        echo "syncing tablespace OID \"$i\""
+
+        ## Create the new target directory
+
+        mkdir "$tmpfn"/.rsync_tblspc_backup/"$i"
+
+        ## Take care if this tablespace OID is new and not already present
+        ## in the last backup, if any
+
+        if [ -d "$last_one/.rsync_tblspc_backup/$i" ]; then
+            $rsync_cmd_tblspc/$i "$(readlink $datadir/pg_tblspc/$i)/" "$tmpfn"/.rsync_tblspc_backup/"$i"/
+        else
+            echo "tablespace OID \"$i\" is new, full sync required"
+            $rsync_cmd_tblspc "$(readlink $datadir/pg_tblspc/$i)/" "$tmpfn"/.rsync_tblspc_backup/"$i"/
+        fi
+
+    done
+
+    # NOTE: We don't want to see any NOTICE messages here, but error messages...
+    PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
+
+    if [ $status -eq 0 ] ; then
+	mv "$tmpfn" "$fn"
+	return 0
+    else
+	rm -rf "$tmpfn"
+	return $status
+    fi
+
+}
+
 do_basebackup() {
 
     local status=0
@@ -486,12 +593,18 @@ do_basebackup() {
     local tmpfn="$archivedir/base/.basebackup_$ts.tar.gz.in-progress"
     local fn="$archivedir/base/basebackup_$ts.tar.gz"
 
+    ## Since do_basebackup() currently doesn't support tablespaces,
+    ## error out in case the datadir uses them.
+    if [ $(ls "$datadir"/pg_tblspc | wc -l) -gt 0 ]; then
+        error "tablespaces not supported by basebackup command."
+    fi
+
     ##
     ## XXX: Take care for trap here, since run_with_lock() might already have
     ##      installed it's cleanup code to remove the lock file for non-Linux
     ##      platforms. We must not overwrite its cleanup action, so make
     ##      sure to keep it.
-    ##      
+    ##
     trap "rm -f $tmpfn && rmdir '$LOCK' > /dev/null 2>&1" INT TRAP QUIT ABRT TERM EXIT # clean up on error
 
     [ -f "$fn" ] && error "Basebackup $fn already exists"
@@ -514,7 +627,7 @@ do_basebackup() {
 ## Recover the specified basebackup into the specified
 ## data directory.
 ##
-do_restore_basebackup() {
+do_restore_backup() {
 
     local status=0
     local fn="$archivedir/base/$1"
@@ -536,6 +649,13 @@ do_restore_basebackup() {
 	error "target directory does not exist"
     fi
 
+    # So far, so good, check if an alternate
+    # tablespace restore directory was specified and
+    # if it exists
+    if [ ! -d "$pgtblspc_replace_dir" ]; then
+        error "tablespace directory \"$pgtblspc_replace_dir\" does not exist"
+    fi
+
     # Target directory empty?
     if [ "$($FIND "$dn" -type f | wc -l)" -gt 2 ]; then
 	## does it contain a running PostgreSQL instance?
@@ -550,12 +670,29 @@ do_restore_basebackup() {
     # Make sure, target directory has 0700 permissions
     chmod 0700 $dn
 
+    echo "restoring base archive ${fn}"
+
     ## Unpack the base backup into the destination
     ## PGDATA directory
     case "$(basename ${fn})" in
+        rsync_backup*)
+
+            rsync -a --exclude '.rsync_tblspc_backup' "${fn}/" "${dn}/"
+
+            ## Get all OIDs for tablespaces to be restored, call _restore_tablespace
+            ## for each OID found...
+            ## The easiest way to do this is to get the OID symlinks from the already
+            ## extracted base.tar file, pass it down to _restore_tablespace which
+            ## does all the remaining leg work.
+
+            local tblspc_oid=$(ls "$dn/pg_tblspc")
+            for i in $tblspc_oid; do
+                _restore_tablespace "$i" "$dn" "$fn"
+            done
+
+            ;;
         streaming_backup*)
 
-            echo "restoring base archive"
             $TAR --force-local -C "$dn" -x -z -f "$fn"/base.tar.gz && echo "successfully restored base.tar.gz"
             echo "checking for tablespaces"
 
@@ -567,7 +704,7 @@ do_restore_basebackup() {
 
             local tblspc_oid=$(ls "$dn/pg_tblspc")
             for i in $tblspc_oid; do
-                _restore_tablespace "$i" "$dn"
+                _restore_tablespace "$i" "$dn" "$fn"
             done
 
             ;;
@@ -596,20 +733,22 @@ do_restore_basebackup() {
 ## Restores a tablespace belonging to a specific
 ## base backup. The base backup files are required to be
 ## restored previously, so this function is intended
-## to be called by do_restore_basebackup() only.
+## to be called by do_restore_backup() only.
 ##
 ## Arguments required are:
 ## $1: Tablespace OID
 ## $2: PGDATA directory
+## $3: Archive directory
 ##
 _restore_tablespace() {
 
     local tblspc_oid="$1"
     local dn="$2"
+    local fn="$3"
     local lnk=""
     local adj_symlink
 
-    case "$1" in
+    case "$tblspc_oid" in
         [0-9]*)
 
             ## Get the link directory, but honor an eventually specified
@@ -631,7 +770,17 @@ _restore_tablespace() {
                     error "directory \"$lnk\" for tablespace OID \"$tblspc_oid\" not empty"
                 fi
 
-                $TAR --force-local -C "$lnk" -x -z -f "$fn"/"$tblspc_oid".tar.gz && echo "successfully restored tablespace ${tblspc_oid}.tar.gz"
+                case "$fn" in
+                    *rsync_backup_*)
+                        rsync -a "$fn"/.rsync_tblspc_backup/"$tblspc_oid"/ "$lnk"
+                        ;;
+                    *streaming_backup_*)
+                        $TAR --force-local -C "$lnk" -x -z -f "$fn"/"$tblspc_oid".tar.gz
+                        ;;
+                esac
+
+                echo "successfully restored tablespace ${tblspc_oid} to \"$lnk\""
+
                 ## In case we have a -T option to replace tablespace directories,
                 ## we need to adjust the symlinks located in PGDATA/pg_tblspc
                 ## as well...
@@ -804,6 +953,9 @@ do_cleanup() {
 
     local fn=$(basename "$1")
     case $fn in
+        rsync_backup_*)
+            ## Fall through, same handler for streaming base backups...
+            ;&
         streaming_backup_*)
 
             ##
@@ -811,8 +963,14 @@ do_cleanup() {
             ## go further. We delete the archive logs anyways, since they don't
             ## have any connection to an existing basebackup.
             ##
+            ## Make sure we check for the correct backup_label file. tar basebackups
+            ## include a separate backup_label file to make sure it occurs in the archive
+            ## first.
+            ##
             if [ -e "$1/base.tar.gz" ]; then
-                first_wal=$(gunzip -c -f "$1/base.tar.gz" | $TAR -f - -x --occurence=1 -O ./backup_label | start_wal_location)
+                first_wal=$(gunzip -c -f "$1/base.tar.gz" | $TAR -f - -x --occurrence=1 -O backup_label | start_wal_location)
+            elif [ -e "$1/PG_VERSION" ]; then
+                first_wal=$(cat "$1/backup_label" | start_wal_location)
             else
                 echo "Basebackup $1 does not exist, use cleanup <HISTORYFILE> to tidy up"
             fi
@@ -831,8 +989,8 @@ do_cleanup() {
             fi
             ;;
         [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup)
-            first_wal=$(cat "$archivedir/log/$1" | start_wal_location)
-            last_wal=$(cat "$archivedir/log/$1" | stop_wal_location)
+            first_wal=$(cat "$archivedir/log/$1" 2>/dev/null | start_wal_location)
+            last_wal=$(cat "$archivedir/log/$1" 2>/dev/null | stop_wal_location)
             if [ ! -f "$archivedir"/log/$last_wal ]; then
                 error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
             fi
@@ -942,6 +1100,75 @@ _get_size() {
 }
 
 ##
+## Returns a list of tablespaces OIDs and paths included in the specified
+## base backup. The returned pathname assigned to the tablespace OID
+## is directly retrieved from the specified basebackup and reflects
+## the real physical tablespace path from the origin pgsql instance.
+##
+_get_backup_tblspc_oids() {
+
+    local fn="$1"
+    local _archive="$archivedir/base/$fn"
+
+    case "$fn" in
+
+        rsync_backup_*)
+            for i in $(ls "$_archive"/.rsync_tblspc_backup 2>/dev/null); do
+                echo "$i->$(readlink $_archive/pg_tblspc/$i)"
+            done
+            ;;
+        streaming_backup_*)
+            for i in $(ls "$_archive/"/[0-9]*.tar.gz 2>/dev/null); do
+                echo $(basename $i .tar.gz)
+            done
+            ;;
+    esac
+
+    echo ""
+
+}
+
+##
+## Checks if the specified base backups contains tablespaces.
+## 0 if true, otherwise 1 is returned.
+##
+_backup_has_tablespaces() {
+
+    local fn="$1"
+
+    case "$fn" in
+
+        rsync_backup_*)
+
+            ## RSYNC base backups store tablespaces within its
+            ## private directory, just check if there are any subdirs
+            ## and we know that there are tablespaces present
+
+            [ $(ls -1 "$archivedir/base/${fn}"/.rsync_tblspc_backup/ 2>/dev/null | wc -l) -gt 0 ] && return 0
+
+            ;;
+
+        streaming_backup_*)
+
+            ## A streaming basebackup has tablespaces within separate tar.gz archives for each
+            ## tablespace.
+
+            [ $(ls -1 "$archivedir/base/${fn}"/[0-9]*.tar.gz 2>/dev/null | wc -l) -gt 0 ] && return 0
+            ;;
+
+        *)
+            ## Unsupported backup type or invalid name, but treat it
+            ## as a simple "no, this is a backup type without tablespaces",
+            ## the error should have been catched before.
+            return 1
+            ;;
+    esac
+
+    ## No tablespaces present
+    return 1
+}
+
+##
 ## do_ls()
 ##
 ## Accepts an argument literal '+' to make the output more verbose.
@@ -949,18 +1176,18 @@ _get_size() {
 ## for a specific base backup are still present or not. Since the
 ## verbose output calculates these information according to the
 ## existing backup history files, we should protect any calls
-## to do_ls '+' with an filesystem lock...see the function 
+## to do_ls '+' with an filesystem lock...see the function
 ## run_with_lock() for details.
 do_ls() {
 
-    local backups basesize wallogsize walcount
+    local backups basesize total_basesize wallogsize walcount
 
     backups=$(ls -t $archivedir/log/[0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup* 2> /dev/null || return 0)
 
     if [ -z "$1" ]; then
         printf "%-51s\t%-9s\n" "Basebackup Filename" "Size"
     else
-        printf "%-33s\t%s\t%-24s %-3s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
+        printf "%-33s %-9s %-24s %-9s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
     fi
 
     echo $hdrline
@@ -978,13 +1205,14 @@ do_ls() {
             *SNAPSHOT*)
                 basesize=0
                 ;;
-            streaming_backup*)
+            rsync_backup_*)
+                ;&
+            streaming_backup_*)
                 # This is an archive directory containing a streaming base backup
                 fn="$(basename $fn)"
                 basesize=$(_get_size "$archivedir/base/$fn")
                 ;;
-            [0-9]*)
-                echo "$x: Label \"$fn\" is not an expected basebackup filename"
+            *)
                 continue
                 ;;
 
@@ -995,20 +1223,28 @@ do_ls() {
         elif [ "$1" = "+" ]; then
 
             local wal_avail='YES'
+            local has_tablespaces="NO"
 
             ## XXX: a backup history file might be compressed, too
             first_wal=$(cat "$x" | gunzip -c -f | start_wal_location)
 
             (test -f "$archivedir/log/$first_wal" || test -f "$archivedir/log/$first_wal.gz") || export wal_avail='NO'
-            printf "%-33s\t%s\t%-24s %-3s\n" "$fn" $basesize $first_wal $wal_avail
-            printf "  \`- %-24s\n" $(basename $x)
+            _backup_has_tablespaces "$fn" && export has_tablespaces="YES"
+            printf "%-33s %-9s %-24s %-9s\n" "$fn" $basesize $first_wal $wal_avail
+            printf "\`- %-24s\n" $(basename $x)
+            if [ x"$has_tablespaces" = x"YES" ]; then
+                printf "\`- Tablespaces\n"
+                printf "   \`- %-9s\n" $(_get_backup_tblspc_oids "$fn")
+            fi
         fi
     done
 
     ## sum up archive log size
     wallogsize=$(du -sh "$archivedir/log/" | awk '{print $1;}')
     walcount=$(ls -1 "$archivedir/log/" | $GREP -E '^[0-9A-Z]{24}\.?[gz]*$' | wc -l)
+    total_basesize="$(_get_size $archivedir/base)"
     echo $hdrline
+    printf "Total size of base backups: %-9s\n" $total_basesize
     printf "Total size occupied by %d WAL segments in archive: %-9s\n" $walcount $wallogsize
 
     return 0
@@ -1036,6 +1272,12 @@ case $mode in
         check_pg_basebackup_dep
         check_archivedir
         run_with_lock do_streambackup
+        ;;
+    rsync)
+        check_psql_dep
+	check_archivedir
+	check_datadir
+        run_with_lock do_rsync_basebackup
         ;;
     basebackup)
         check_psql_dep
@@ -1076,7 +1318,7 @@ case $mode in
 	check_archivedir
         ## NOTE: do_restore_basebackup() does its
         ##       own sanity checks on $datadir
-        run_with_lock do_restore_basebackup "$1" "$datadir"
+        run_with_lock do_restore_backup "$1" "$datadir"
 	    ;;
     *)
         error "invalid mode: \"$1\"";;

@@ -1,4 +1,4 @@
-.TH PG_BACKUP_CTL "1" "2013-03-14" "PostgreSQL Tools" "pg_backup_ctl"
+.TH PG_BACKUP_CTL "1" "2015-10-11" "PostgreSQL Tools" "pg_backup_ctl"
 .SH NAME
 pg_backup_ctl \- Utility to backup and recover a running PostgresSQL database server
 
@@ -56,6 +56,17 @@ Perform a base backup using LVM snapshot.
 Create an LVM snapshot for an external backup command like bacula.
 (Requires \fB-L\fR, \fB-M\fR, -\fBn\fR, \fB-N\fR)
 .RE
+
+\fBrsyncbackup\fR
+.RS 4
+Perform a basebackup with rsync.
+
+This command \fBrequires rsync\fR accessible via PATH.
+Backups performed with rsyncbackup will save disk space between
+multiple runs for unchanged files, since they are just hardlinked.
+See the --link-dest parameter of the rsync command.
+.RE
+
 
 \fBstreambackup\fR
 .RS 4
@@ -188,6 +199,19 @@ To do a base backup (Note: setup the environment is required):
 .sp
 .RS 4
 $ \fBpg_backup_ctl -A /mnt/backup/pgsql basebackup\fR
+.RE
+
+To do a streaming base backup backup (Note: setup the environment and configuring the
+PostgreSQL database server to allow streaming replication is required):
+.sp
+.RS 4
+$ \fBpg_backup_ctl -A /mnt/backup/pgsql streambackup\fR
+.RE
+
+To do a base backup backup with rsync (Note: setup the environment is required):
+.sp
+.RS 4
+$ \fBpg_backup_ctl -A /mnt/backup/pgsql rsyncbackup\fR
 .RE
 
 To copy the current log segment(s):
