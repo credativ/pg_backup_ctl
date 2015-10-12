@@ -301,13 +301,9 @@ check_archivedir() {
         error "no archive directory specified"
     fi
 
-    local x
-
-    for x in "$archivedir"/{base,log} ${1:+"$archivedir/$1"}; do
-        if [ ! -d "$x" ]; then
-            mkdir -p "$x"
-        fi
-    done
+    if [ ! -d "$archivedir" ]; then
+        error "archive directory \"$archivedir\" does not exist"
+    fi
 
     ## Force LOCK file to be in $archivedir. This fixes an issue on
     ## some Linux systems, where /var/lock/ isn't writeable by daemons.
@@ -369,6 +365,18 @@ check_lvm_params() {
 }
 
 do_setup() {
+
+
+    ## XXX: We don't care if the archive directory already exists, since
+    ##      it might just be possible that the user wants to reconfigure
+    ##      PostgreSQL only.
+    local x
+
+    for x in "$archivedir"/{base,log} ${1:+"$archivedir/$1"}; do
+        if [ ! -d "$x" ]; then
+            mkdir -p "$x"
+        fi
+    done
 
     if [ $(ls "$datadir"/pg_tblspc | wc -l) -gt 0 ]; then
         warn "clusters uses tablespaces, this is not supported by basebackup and lvm snapshot commands"
