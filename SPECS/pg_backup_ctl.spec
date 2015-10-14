@@ -3,11 +3,11 @@
 Summary: Script to manage online backups with PostgreSQL
 Name:    %{toolname}
 BuildArch: noarch
-Version: 0.7
+Version: 0.8
 Release: 0%{?dist}
 License: GPLv3
 Group:   Applications/Databases
-URL:     http://www.credativ.de
+URL:     https://github.com/credativ/pg_backup_ctl
 Source0: %{toolname}-%{version}.tar.bz2
 BuildRoot: %{_tmppath}/%{toolname}-%{version}-%{release}-root-%(%{__id_u} -n)
 Requires: postgresql >= 8.3
@@ -45,6 +45,10 @@ rm -rf %{buildroot}
 %{_sysconfdir}/bash_completion.d/
 
 %changelog
+* Fri Jan 23 2015 Bernd Helmle <bernd.helmle@credativ.de>
+- Update to new upstream release 0.8
+- Support base backups via rsync
+- Improved tablespace support
 * Fri Jan 23 2015 Bernd Helmle <bernd.helmle@credativ.de>
 - Update to new upstream release 0.7
 - Support streamed basebackups via pg_basebackup
