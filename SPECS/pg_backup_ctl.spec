@@ -5,7 +5,7 @@ Name:    %{toolname}
 BuildArch: noarch
 Version: 0.8
 Release: 0%{?dist}
-License: GPLv3
+License: BSD
 Group:   Applications/Databases
 URL:     https://github.com/credativ/pg_backup_ctl
 Source0: %{toolname}-%{version}.tar.bz2
