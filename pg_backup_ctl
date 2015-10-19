@@ -1281,7 +1281,7 @@ case $mode in
         check_archivedir
         run_with_lock do_streambackup
         ;;
-    rsync)
+    rsyncbackup)
         check_psql_dep
 	check_archivedir
 	check_datadir
@@ -1329,5 +1329,5 @@ case $mode in
         run_with_lock do_restore_backup "$1" "$datadir"
 	    ;;
     *)
-        error "invalid mode: \"$1\"";;
+        error "invalid mode: \"$mode\"";;
 esac
