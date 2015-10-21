@@ -372,7 +372,7 @@ do_setup() {
     ##      PostgreSQL only.
     local x
 
-    for x in "$archivedir"/{base,log} ${1:+"$archivedir/$1"}; do
+    for x in "$archivedir"/{current,base,log,lvm_snapshot} ${1:+"$archivedir/$1"}; do
         if [ ! -d "$x" ]; then
             mkdir -p "$x"
         fi
