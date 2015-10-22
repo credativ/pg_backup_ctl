@@ -513,7 +513,7 @@ do_rsync_basebackup() {
     local tmpfn="$archivedir/base/.rsync_backup_$ts.in-progress"
     local fn="$archivedir/base/rsync_backup_$ts"
     local last_one=$(_get_last_rsync_backup)
-    local rsync_cmd="rsync -a --delete"
+    local rsync_cmd="rsync -q -a --delete"
     local rsync_cmd_tblspc="$rsync_cmd"
     local tblspc_oids=""
 
