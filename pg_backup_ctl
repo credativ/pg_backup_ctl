@@ -30,7 +30,7 @@
 ##
 ## pg_backup_ctl - PostgreSQL transaction log archival backup control program
 ##
-## Version: 0.7
+## Version: 0.8
 
 set -e
 umask 077
@@ -305,6 +305,11 @@ check_archivedir() {
         error "archive directory \"$archivedir\" does not exist"
     fi
 
+    # Archive directory writeable?
+    if [ ! -w "$archivedir" ]; then
+        error "no write access to archive directory \"$archivedir\""
+    fi
+
     ## Force LOCK file to be in $archivedir. This fixes an issue on
     ## some Linux systems, where /var/lock/ isn't writeable by daemons.
     ## $archivedir must be writable by the postgres user anyway, so we
@@ -513,7 +518,7 @@ do_rsync_basebackup() {
     local tmpfn="$archivedir/base/.rsync_backup_$ts.in-progress"
     local fn="$archivedir/base/rsync_backup_$ts"
     local last_one=$(_get_last_rsync_backup)
-    local rsync_cmd="rsync -q -a --delete"
+    local rsync_cmd="rsync -q -a --delete  --exclude postmaster.pid "
     local rsync_cmd_tblspc="$rsync_cmd"
     local tblspc_oids=""
 
@@ -660,8 +665,13 @@ do_restore_backup() {
     # So far, so good, check if an alternate
     # tablespace restore directory was specified and
     # if it exists
-    if [ ! -d "$pgtblspc_replace_dir" ]; then
+    if [ ! -z "$pgtblspc_replace_dir" ] && [ ! -d "$pgtblspc_replace_dir" ]; then
         error "tablespace directory \"$pgtblspc_replace_dir\" does not exist"
+    fi
+
+    ## Relocated tablespace directory writable by us?
+    if [ ! -z "$pgtblspc_replace_dir" ] && [ ! -w "$pgtblspc_replace_dir" ]; then
+        error "no write access to relocated tablespace directory \"$pgtblspc_replace_dir\""
     fi
 
     # Target directory empty?
@@ -975,12 +985,12 @@ do_cleanup() {
             ## include a separate backup_label file to make sure it occurs in the archive
             ## first.
             ##
-            if [ -e "$1/base.tar.gz" ]; then
-                first_wal=$(gunzip -c -f "$1/base.tar.gz" | $TAR -f - -x --occurrence=1 -O backup_label | start_wal_location)
-            elif [ -e "$1/PG_VERSION" ]; then
-                first_wal=$(cat "$1/backup_label" | start_wal_location)
+            if [ -e "${archivedir}/base/${fn}/base.tar.gz" ]; then
+                first_wal=$(gunzip -c -f "${archivedir}/base/$fn}/base.tar.gz" | $TAR -f - -x --occurrence=1 -O backup_label | start_wal_location)
+            elif [ -e "${archivedir}/base/${fn}/PG_VERSION" ]; then
+                first_wal=$(cat "${archivedir}/base/${fn}/backup_label" | start_wal_location)
             else
-                echo "Basebackup $1 does not exist, use cleanup <HISTORYFILE> to tidy up"
+                echo "Basebackup ${fn} does not exist, use cleanup <HISTORYFILE> to tidy up"
             fi
             ;;
         basebackup_*.tar*)
