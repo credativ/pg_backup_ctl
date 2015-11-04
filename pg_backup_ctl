@@ -1000,10 +1000,10 @@ do_cleanup() {
             ## go further. We delete the archive logs anyways, since they don't
             ## have any connection to an existing basebackup.
             ##
-            if [ -e "$1" ]; then
-                first_wal=$(gunzip -c -f "$1" | $TAR -f - -x --occurrence=1 -O ./backup_label | start_wal_location)
+            if [ -e "$archivedir/base/${fn}" ]; then
+                first_wal=$(gunzip -c -f "$archivedir/base/${fn}" | $TAR -f - -x --occurrence=1 -O ./backup_label | start_wal_location)
             else
-                echo "Basebackup $1 does not exist, use cleanup <HISTORYFILE> to tidy up"
+                echo "Basebackup $fn does not exist, use cleanup <HISTORYFILE> to tidy up"
             fi
             ;;
         [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup)
