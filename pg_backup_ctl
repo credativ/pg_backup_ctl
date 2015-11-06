@@ -187,7 +187,7 @@ shift
 # functions
 
 warn() {
-    echo "$me WARNIGN:" "$@" 1>&2
+    echo "$me WARNING:" "$@" 1>&2
 }
 
 error() {
@@ -195,6 +195,9 @@ error() {
     exit 1
 }
 
+notice() {
+    echo "$me NOTICE: " "$@" 1>&2
+}
 
 current_setting() {
     psql -tA -c "SELECT current_setting('$1');"
@@ -1086,14 +1089,71 @@ do_cleanup() {
 
     if [ -f "$archivedir"/log/$first_wal ] || [ -f "$archivedir"/log/$first_wal.gz ]; then
         local old_files=$(ls "$archivedir"/log | $SED -n "/$first_wal/q;p")
+       
         (
         cd "$archivedir"/log
+
+        local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup' | xargs cat | backup_label)
+
         if [ "$cleanup_move" = yes ]; then
             $TAR --force-local -c -z -f "$archivedir"/base/oldwals-$(timestamp).tar.gz $old_files
         fi
-        rm -rf $old_files
+
+        ## Delete old base backups first. We loop through the list,
+        ## since we assume not that many base backup files in the archive that
+        ## would eat much execution time.
+        ##
+        ## NOTE: Since the base backup is fully qualified
+        ##       in the backup label, we don't need to explicitely add
+        ##       the absolute archive path.
+        ##
+        ##       LVM snapshot needs special handling here, since
+        ##       they aren't stored inline the backup catalog.
+        for i in $old_base_backups; do
+            local rc
+            basebackup_exists $i
+            rc=$?
+
+            if [ $rc -eq 0 ]; then
+                notice "deleting base backup \"$i\""
+                rm -r "$i"
+            elif [ $rc -lt 1 ]; then
+                warn "LVM snapshot \"$i\" skipped"
+            else
+                warn "base backup \"$i\" does not exist, ignored"
+            fi
+
+        done
+
+        ## now cleanup transaction log files
+        [ ! -z "$old_files" ] && echo $old_files | xargs rm
         )
     fi
+}
+
+##
+## Checks wether the specified base backup exists in the catalog.
+## Returns 0 in case of true, 1 in case of not existant.
+## A return code 2 indicates a LVM snapshot not stored inline
+## in the backup catalog.
+basebackup_exists() {
+
+    local fn="$(basename $1)"
+    local rc=1
+
+    case ${fn} in
+        LVM*SNAPSHOT*)
+            ## LVM SNAPSHOT is not an internally stored base backup,
+            rc=2
+            ;;
+        *)
+            test -e "$archivedir/base/${fn}"
+            rc=$?
+            ;;
+    esac
+
+    return $rc
+
 }
 
 backup_label() {
