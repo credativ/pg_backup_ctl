@@ -143,6 +143,7 @@ LVM snapshot control:
   -N LVMDATADIR PostgreSQL DATADIR relative to partition (i.e. the path
                 to DATADIR inside the LVM snapshot)
   -o MOUNTOPTS  additional options passed to LVM snapshot mount
+  -t FS TYPE    filesystem type to mount LVM snapshot
 Server connection control:
   -h HOSTNAME   server host name
   -p PORT       server port
@@ -155,7 +156,7 @@ if [ "${1:---help}" = "--help" ]; then
     print_help
 fi
 
-set -- $(getopt A:D:h:l:L:M:mn:N:o:p:U:T:z "$@")
+set -- $(getopt A:D:h:l:L:M:mn:N:o:p:U:t:T:z "$@")
 
 while :; do
     case $1 in
@@ -171,6 +172,7 @@ while :; do
 	-N) lvmdatadir=$2; shift;;
         -o) mountopts=$2; shift;;
         -p) export PGPORT=$2; shift;;
+        -t) lvm_fstype=$2; shift;;
         -T) pgtblspc_replace_dir=$(readlink -f $2); shift;;
         -U) export PGUSER=$2; shift;;
         -z) gzip=yes;;
@@ -366,6 +368,10 @@ check_lvm_params() {
 	if [ -z "$lvmdatadir" ]; then
 		error "LVM snapshots requires the datadir relative to $archivedir/lvm_snapshot (-N)"
 	fi
+
+        if [ ! -z "lvm_fstype" ]; then
+            lvm_fstype="-t $lvm_fstype"
+        fi
 
         if [ ! -z "$mountopts" ]; then
             mountopts="-o $mountopts"
@@ -881,9 +887,9 @@ _create_snapshot_LVM() {
     psql -c "SELECT pg_stop_backup();" >/dev/null
     [ $status -ne 0 ] && echo "LVM snapshot failed with status $status" && return $status
 
-    ## mount the snapshot in the archive directory LVM snaphost mountpoint
+    ## mount the snapshot in the archive directory LVM snapshot mountpoint
     local LVMSNAPSHOTMNT="$(dirname $lvm_vol)/$lvm_snap_name"
-    sudo /bin/mount $mountopts $LVMSNAPSHOTMNT "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
+    sudo /bin/mount $lvm_fstype $mountopts $LVMSNAPSHOTMNT "$archivedir"/lvm_snapshot || error "could not mount snapshot in $archivedir/lvm_snapshot"
 
 }
 
@@ -945,6 +951,7 @@ do_remove-lvmsnapshot() {
 do_lvmbasebackup() {
     check_lvm_params
 
+    set -e
     local status=0
 
     local fn="$archivedir"/base/basebackup_$(timestamp).tar.gz
@@ -1072,9 +1079,6 @@ do_cleanup() {
                 ##      backups according to the backup history files found there.
 		do_cleanup $oldest_keep
 
-		for i in $candidates; do
-		    rm -r "$i"
-		done
 	    fi
 
 	    ## exit immediately after cleaning base backups. We *must* return
