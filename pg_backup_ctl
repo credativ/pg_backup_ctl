@@ -168,7 +168,7 @@ while :; do
 	-M) lvm_vol=$2; shift;;
         -m) cleanup_move=yes;;
 	-n) lvm_snap_name=$2; shift;;
-	-N) lvmdatadir=$(readlink -f $2); shift;;
+	-N) lvmdatadir=$2; shift;;
         -o) mountopts=$2; shift;;
         -p) export PGPORT=$2; shift;;
         -T) pgtblspc_replace_dir=$(readlink -f $2); shift;;
