@@ -555,7 +555,18 @@ do_rsync_basebackup() {
     fi
 
     psql -c "SELECT pg_start_backup('$fn');" >/dev/null
-    $rsync_cmd "$datadir/" "$tmpfn/"
+
+    ## Catch non-zero exit code explicitely and don't rely on set -e. We need
+    ## to issue a pg_stop_backup(), otherwise this would be hanging around
+    ## forever.
+    $rsync_cmd "$datadir/" "$tmpfn/" || status=$?
+
+    ## non-zero exit status means failed rsync
+    if [ "$status" -ne 0 ]; then
+        # NOTE: We don't want to see any NOTICE messages here, but error messages...
+        PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
+        return $status
+    fi
 
     ## The basebackup for PGDATA should be completed now, we need to
     ## check if there are any remaining tablespaces to be synced. We do
