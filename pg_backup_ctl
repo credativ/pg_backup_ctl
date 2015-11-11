@@ -1007,7 +1007,7 @@ do_cleanup() {
             ## first.
             ##
             if [ -e "${archivedir}/base/${fn}/base.tar.gz" ]; then
-                first_wal=$(gunzip -c -f "${archivedir}/base/$fn}/base.tar.gz" | $TAR -f - -x --occurrence=1 -O backup_label | start_wal_location)
+                first_wal=$(gunzip -c -f "${archivedir}/base/${fn}/base.tar.gz" | $TAR -f - -x --occurrence=1 -O backup_label | start_wal_location)
             elif [ -e "${archivedir}/base/${fn}/PG_VERSION" ]; then
                 first_wal=$(cat "${archivedir}/base/${fn}/backup_label" | start_wal_location)
             else
