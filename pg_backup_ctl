@@ -565,7 +565,7 @@ do_rsync_basebackup() {
     if [ "$status" -ne 0 ]; then
         # NOTE: We don't want to see any NOTICE messages here, but error messages...
         PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
-        return $status
+        error "error creating base backup, you might need to do a manual cleanup"
     fi
 
     ## The basebackup for PGDATA should be completed now, we need to
