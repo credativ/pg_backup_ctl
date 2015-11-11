@@ -1035,8 +1035,8 @@ do_cleanup() {
             fi
             ;;
         [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup.gz)
-            first_wal=$(gunzip -c -f "$1" | start_wal_location)
-            last_wal=$(gunzip -c -f "$1" | stop_wal_location)
+            first_wal=$(gunzip -c -f "$archivedir/log/$1" | start_wal_location)
+            last_wal=$(gunzip -c -f "$archivedir/log/$1" | stop_wal_location)
             if [ ! -f "$archivedir"/log/"$last_wal.gz" ]; then
                 error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
             fi
@@ -1108,7 +1108,7 @@ do_cleanup() {
         (
         cd "$archivedir"/log
 
-        local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup' | xargs cat | backup_label)
+        local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup*' | (xargs gunzip -d -c || xargs cat) | backup_label)
 
         if [ "$cleanup_move" = yes ]; then
             $TAR --force-local -c -z -f "$archivedir"/base/oldwals-$(timestamp).tar.gz $old_files
