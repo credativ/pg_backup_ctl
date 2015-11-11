@@ -259,6 +259,7 @@ run_with_lock()
 
         ## run the command
         $command
+	status=$?
 
         ## ..and we're done
         ## rmdir "$LOCK"
@@ -279,8 +280,10 @@ run_with_lock()
 
         ) 284>$LOCK
 
+	status=$?
         set -e
     fi
+    return $status
 }
 
 ##
