@@ -1112,7 +1112,7 @@ do_cleanup() {
         (
         cd "$archivedir"/log
 
-        local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup*' | (xargs gunzip -d -c || xargs cat) | backup_label)
+        local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup*' | (xargs gunzip -d -c 2>/dev/null || xargs cat) | backup_label)
 
         if [ "$cleanup_move" = yes ]; then
             $TAR --force-local -c -z -f "$archivedir"/base/oldwals-$(timestamp).tar.gz $old_files
