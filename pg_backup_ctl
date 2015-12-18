@@ -440,11 +440,12 @@ do_setup() {
         local wallevel=$(current_setting wal_level)
 
         if $GREP -q wal_level "$cf"; then
-            if [ ! -z "$wallevel" ] && [ "$wallevel" != "archive" ] && [ "$wallevel" != "hot_standby" ]; then
+            if [ ! -z "$wallevel" ] && [ "$wallevel" != "archive" ] \
+                && [ "$wallevel" != "hot_standby" ] && [ "$wallevel" != "logical" ]; then
                 $SED -i -e '/wal_level/ c wal_level = archive' "$cf"
                 echo "HINT: set wal_level to 'archive', you need to restart the server to get this setting into effect"
             else
-                echo "HINT: wal_level already set to 'archive'"
+                echo "HINT: wal_level already set to \"$wallevel\", no action required"
             fi
         else
             (echo; echo "# automatically added by $me"; echo "wal_level = archive") >>$cf
