@@ -2,8 +2,9 @@ Source: pg-backup-ctl
 Section: database
 Priority: optional
 Maintainer: Adrian Vondendriesch <adrian.vondendriesch@credativ.de>
-Build-Depends: debhelper (>= 8.0.0)
-Standards-Version: 3.9.3
+Uploaders: Christoph Berg <myon@debian.org>
+Build-Depends: bash-completion, debhelper (>= 9)
+Standards-Version: 3.9.7
 Homepage: https://github.com/credativ/pg_backup_ctl
 Vcs-Git: git://github.com/credativ/pg_backup_ctl.git
 Vcs-Browser: https://github.com/credativ/pg_backup_ctl
@@ -11,6 +12,7 @@ Vcs-Browser: https://github.com/credativ/pg_backup_ctl
 Package: pg-backup-ctl
 Architecture: all
 Depends: ${misc:Depends}
-Description: Utility to backup and recover a running PostgresSQL database
+Description: backup and recover PostgreSQL using log archiving
  pg_backup_ctl is a tool to simplify the steps needed to make a full
- transaction log archival backup of PostgreSQL clusters.
+ transaction log archival backup of PostgreSQL clusters to enable
+ Point-in-Time Recovery (PITR).

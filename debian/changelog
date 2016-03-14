@@ -1,8 +1,15 @@
+pg-backup-ctl (0.8) unstable; urgency=medium
+
+  * Bump to dh compat 9.
+
+ -- Christoph Berg <christoph.berg@credativ.de>  Mon, 14 Mar 2016 11:52:10 +0100
+
 pg-backup-ctl (0.7) unstable; urgency=low
 
   * Some code improvements and cleanup.
 
  -- Adrian Vondendriesch <adrian.vondendriesch@credativ.de>  Fri, 15 Mar 2013 10:08:10 +0100
+
 pg-backup-ctl (0.6) unstable; urgency=low
 
   * Initial release 
