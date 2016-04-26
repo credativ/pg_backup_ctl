@@ -372,7 +372,7 @@ check_lvm_params() {
 		error "LVM snapshots requires the datadir relative to $archivedir/lvm_snapshot (-N)"
 	fi
 
-        if [ ! -z "lvm_fstype" ]; then
+        if [ ! -z "$lvm_fstype" ]; then
             lvm_fstype="-t $lvm_fstype"
         fi
 
