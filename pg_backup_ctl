@@ -1116,7 +1116,7 @@ do_cleanup() {
 	    if [ -f "$archivedir"/log/$first_wal ]; then
 		xargs cat
 	    else
-		xargs gunzip -d -c
+		xargs -r gunzip -d -c
 	    fi | backup_label
 	)
 
