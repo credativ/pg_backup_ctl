@@ -1,0 +1,4 @@
+*debhelper*
+files
+pg-backup-ctl/
+*.substvars

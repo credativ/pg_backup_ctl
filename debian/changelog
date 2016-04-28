@@ -1,3 +1,9 @@
+pg-backup-ctl (0.9) UNRELEASED; urgency=medium
+
+  * Add pandoc to Build-Depends.
+
+ -- Christoph Berg <christoph.berg@credativ.de>  Thu, 28 Apr 2016 15:14:28 +0200
+
 pg-backup-ctl (0.8) unstable; urgency=medium
 
   * Bump to dh compat 9.

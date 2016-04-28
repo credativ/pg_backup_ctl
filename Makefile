@@ -1,13 +1,16 @@
 PROJECT = pg_backup_ctl
 PG_BACKUP_CTL_VERSION = 0.8
 
-FILES = Makefile pg_backup_ctl pg_backup_ctl.1 README pg-backup-ctl.bash-completion
+FILES = Makefile pg_backup_ctl pg_backup_ctl.1 pg_backup_ctl.md README pg-backup-ctl.bash-completion
 PREFIX = /usr
 
-all:
+all: pg_backup_ctl.1
 	sed -i "s/^## Version: .*/## Version: ${PG_BACKUP_CTL_VERSION}/g" pg_backup_ctl
 
-install:
+pg_backup_ctl.1: pg_backup_ctl.md
+	pandoc -s -t man -o $@ $^
+
+install: pg_backup_ctl.1
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install pg_backup_ctl $(DESTDIR)$(PREFIX)/bin
 	install -d $(DESTDIR)$(PREFIX)/share/man/man1
@@ -25,7 +28,6 @@ origtar: distribution
 
 clean:
 	rm -f *~
-	rm -f *.*~
 	rm -rf ${PROJECT}-${PG_BACKUP_CTL_VERSION}
 	rm -f ${PROJECT}-${PG_BACKUP_CTL_VERSION}.tar.bz2
 

@@ -3,8 +3,8 @@ Section: database
 Priority: optional
 Maintainer: Adrian Vondendriesch <adrian.vondendriesch@credativ.de>
 Uploaders: Christoph Berg <myon@debian.org>
-Build-Depends: bash-completion, debhelper (>= 9)
-Standards-Version: 3.9.7
+Build-Depends: bash-completion, debhelper (>= 9), pandoc
+Standards-Version: 3.9.8
 Homepage: https://github.com/credativ/pg_backup_ctl
 Vcs-Git: git://github.com/credativ/pg_backup_ctl.git
 Vcs-Browser: https://github.com/credativ/pg_backup_ctl
