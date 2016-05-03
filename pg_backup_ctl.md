@@ -82,9 +82,9 @@ Remove an LVM snapshot created with create-lvmsnapshot (requires **-M** and **-n
 
 ## restore _BASEBACKUP_
 
-Restores _basebackup_ into the directory specified by the **-D** parameter. This directory must already exist and be empty. In case the backup contains tablespaces, the respective target directories need to exist and be empty.
+Restores _BASEBACKUP_ into the directory specified by the **-D** parameter. This directory must already exist and be empty. In case the backup contains tablespaces, the respective target directories need to exist and be empty.
 
-The destination directory will also contain a generated **recovery.conf**, suitable to start a PostgreSQL instance for recovery immediately.
+The destination directory will also contain a generated **recovery.conf**, suitable for starting a PostgreSQL instance for recovery immediately.
 
 It is still possible to do the recovery process completely manually. The recovery process is detailed in the documentation.
 
@@ -114,7 +114,7 @@ The following command-line options control actions done by **pg_backup_ctl**.
 
 ## -A _ARCHIVEDIR_
 
-The directory which will contain all backup files, configuration files and history files. This parameter is required for all modes.
+The directory which will contain all backup files, configuration files and history files. This parameter is required for all commands.
 
 ## -D _DATADIR_
 

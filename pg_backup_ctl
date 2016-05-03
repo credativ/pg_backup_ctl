@@ -68,84 +68,91 @@ print_help() {
 PostgreSQL transaction log archival backup control program
 Supports PostgreSQL 8.3 and above
 
-Usage: $me -A ARCHIVEDIR [OPTION...] MODE
+Usage: $me -A ARCHIVEDIR [OPTIONS...] COMMAND
 
-Modes:
-  basebackup     perform a base backup
-  cleanup [ FILENAME | XLOG | +[1-9]* ]
-                 remove old WAL files after new base backup (run from cron job)
+Commands:
+  setup          Prepare server for transaction log archival
 
-                 It is possible to specify the base backup filename FILENAME,
-                 which WAL files should be kept at least or the WAL file XLOG.
-                 If a positive number greater than zero is specified, the
-                 cleanup command will treat it as its retention policy and keep
-                 at least this number of base backup files. Please note that the
-                 latter form of the cleanup command will delete all outdated
-                 base backups as well whereas the two forms of cleanup invoked
-                 with filenames will delete the WAL files only.
+  basebackup     Perform a base backup (this won't work when using tablespaces; 
+                 use streambackup instead)
 
-                 If no argument is specified, cleanup will remove all WAL
-                 files except those which are required by the latest base
-                 backup.
-
+  lvmbasebackup  Perform a base backup using an LVM snapshot (requires -L, -M, 
+                 -n, -N)
+ 
   create-lvmsnapshot
-                 create an LVM snapshot for an external backup command
+                 Create an LVM snapshot for an external backup command
                  (requires -L -M -n -N)
 
-  currentbackup  backup the current WAL file (run from cron job)
-
-  ls[+]          Lists available base backups and their size in the current archive.
-                 When issued with +, the ls command will examine the WAL archive
-                 and the minimum WAL segment file, required to use the backup
-                 to perform a full recovery.
-
-  lvmbasebackup  perform a base backup using LVM snapshot
-                 (requires -L -M -n -N)
-  rsyncbackup
-                 Perform a basebackup with rsync. This also saves backup space
+  rsyncbackup    Perform a base backup with rsync. This also saves backup space
                  in case multiple rsync basebackups are used by hardlinking
                  unchanged files. If a retention policy > 1 is used, then
                  unchanged files are just allocated once in the base backup
                  repository. See the --link-dest parameter in the rsync
                  documentation for details.
 
-  setup          prepare server for transaction log archival
+  streambackup   Perform a streaming base backup.
 
-  streambackup   perform a streaming basebackup.
-
-                 This command requires PostgreSQL 9.1 and above and pg_basebackup
-                 accessible via PATH. The server should be configured to allow
-                 streaming replication connections.
+                 This command requires PostgreSQL 9.1 and above and 
+                 pg_basebackup accessible via PATH. The server should be 
+                 configured to allow streaming replication connections.
 
   remove-lvmsnapshot
-                 remove an LVM snapshot created with create-lvmsnapshot
+                 Remove an LVM snapshot created with create-lvmsnapshot 
+                 (requires -M and -n)
 
   restore BASEBACKUP
-                 Restores the specified basebackup into the specified
-                 directory by the -D parameter. 
-                 The directory must already exist and be empty.
-                 The destination directory will also contain a generated
-                 recovery.conf, suitable to start a PostgreSQL instance for
-                 recovery immediately.
+                 Restores the specified BASEBACKUP into the directory specified 
+                 by the -D parameter. The directory must already exist and be 
+                 empty. In case the backup contains tablespaces, the respective 
+                 target directories need to exist and be empty. The destination 
+                 directory will also contain a generated recovery.conf, suitable
+                 for starting a PostgreSQL instance for recovery immediately.
+
+  currentbackup  Back up the current WAL file and remove old WAL backups (run 
+                 from cron job)
+
+  cleanup [ BASEBACKUP | XLOG | +N ]
+                 Remove old base backups and WAL files (run from cron job)
+
+                 If BASEBACKUP is specified, then all base backups and WAL 
+                 files that are older than BASEBACKUP will be removed, while 
+                 BASEBACKUP itself and all newer base backups and WAL files will
+                 not be touched. Likewise, you can specify a WAL backup file 
+                 XLOG, in which case anything older than the base backup to 
+                 which this WAL backup belongs will be removed.
+
+                 If a positive number N is specified, the cleanup command will 
+                 treat it as its retention policy and keep at least this number 
+                 of base backup files.
+
+                 If no argument is specified, cleanup will use the latest base 
+                 backup as its point of reference, i. e. all WAL files that are 
+                 not needed by this base backup and all older base backups will 
+                 be removed.
+
+  ls[+]          Lists available base backups and their size in the current 
+                 archive. When issued with +, the ls command will examine the 
+                 WAL archive and display the minimum WAL segment file required 
+                 to use the backup to perform a full recovery.
 
 Options:
   -A ARCHIVEDIR archival target directory (required)
-  -D DATADIR    database system directory (required for specific commands)
+  -D DATADIR    database system directory (required for some commands)
   -T TABLESPACE Target directory for tablespace location during restore
                 (replaces the original symlinks in the base backup, but places
                 all tablespaces into one directory)
-  -m            archive old log files before deleting them
-  -z            use gzip to compress archived WAL segments
-  -l            Place pg_backup_ctl lock file in the specified directory
+  -m            archive old log files before deleting them (used with cleanup)
+  -z            use gzip to compress archived WAL segments (used with setup)
+  -l LOCKDIR    Place pg_backup_ctl's lock file in the specified directory
                 (default is ARCHIVEDIR)
 LVM snapshot control:
-  -L LVM SIZE   determines the buffer size for an LVM snapshot
+  -L LVMSIZE    determines the buffer size for an LVM snapshot
   -M VOLUME     LVM volume identifier to create the snapshot on
   -n SNAPSHOT   LVM snapshot volume name
-  -N LVMDATADIR PostgreSQL DATADIR relative to partition (i.e. the path
-                to DATADIR inside the LVM snapshot)
+  -N LVMDATADIR PostgreSQL DATADIR relative to partition (i. e. the path to 
+                DATADIR inside the LVM snapshot)
   -o MOUNTOPTS  additional options passed to LVM snapshot mount
-  -t FS TYPE    filesystem type to mount LVM snapshot
+  -t FSTYPE     filesystem type to mount LVM snapshot
 Server connection control:
   -h HOSTNAME   server host name
   -p PORT       server port
@@ -1426,5 +1433,5 @@ case $mode in
         run_with_lock do_restore_backup "$1" "$datadir"
 	    ;;
     *)
-        error "invalid mode: \"$mode\"";;
+        error "invalid command: \"$mode\"";;
 esac
