@@ -53,12 +53,14 @@ then
     FIND="gfind"
     TAR="gtar"
     TAIL="gtail"
+    XARGS="gxargs"
 else
     SED="sed"
     GREP="grep"
     FIND="find"
     TAR="tar"
     TAIL="tail"
+    XARGS="xargs"
 fi
 
 print_help() {
@@ -1114,9 +1116,9 @@ do_cleanup() {
 
         local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup*' |
 	    if [ -f "$archivedir"/log/$first_wal ]; then
-		xargs cat
+		$XARGS cat
 	    else
-		xargs -r gunzip -d -c
+		$XARGS -r gunzip -d -c
 	    fi | backup_label
 	)
 
@@ -1151,7 +1153,7 @@ do_cleanup() {
         done
 
         ## now cleanup transaction log files
-        [ ! -z "$old_files" ] && echo $old_files | xargs rm
+        [ ! -z "$old_files" ] && echo $old_files | $XARGS rm
         )
     fi
 }
