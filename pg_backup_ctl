@@ -211,7 +211,7 @@ notice() {
 }
 
 current_setting() {
-    psql -tA -c "SELECT current_setting('$1');"
+    psql -tAX -c "SELECT current_setting('$1');"
 }
 
 timestamp() {
@@ -345,8 +345,8 @@ check_datadir() {
         datadir="$(current_setting data_directory)"
     fi
 
-    if [ ! -r "$datadir"/PG_VERSION ]; then
-        error "cannot read data directory (permissions?)"
+    if [ ! -r "$datadir/PG_VERSION" ]; then
+        error "cannot read $datadir/PG_VERSION (permissions?)"
     fi
 
 }
@@ -567,7 +567,7 @@ do_rsync_basebackup() {
        rsync_cmd_tblspc="$rsync_cmd_tblspc --link-dest=$last_one/.rsync_tblspc_backup"
     fi
 
-    psql -c "SELECT pg_start_backup('$fn');" >/dev/null
+    psql -Xc "SELECT pg_start_backup('$fn');" >/dev/null
 
     ## Catch non-zero exit code explicitely and don't rely on set -e. We need
     ## to issue a pg_stop_backup(), otherwise this would be hanging around
@@ -577,7 +577,7 @@ do_rsync_basebackup() {
     ## non-zero exit status means failed rsync
     if [ "$status" -ne 0 ]; then
         # NOTE: We don't want to see any NOTICE messages here, but error messages...
-        PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
+        PGOPTIONS='--client-min-messages=WARNING' psql -Xc "SELECT pg_stop_backup();" 1>/dev/null
         error "error creating base backup, you might need to do a manual cleanup"
     fi
 
@@ -620,7 +620,7 @@ do_rsync_basebackup() {
     done
 
     # NOTE: We don't want to see any NOTICE messages here, but error messages...
-    PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
+    PGOPTIONS='--client-min-messages=WARNING' psql -Xc "SELECT pg_stop_backup();" 1>/dev/null
 
     if [ $status -eq 0 ] ; then
 	mv "$tmpfn" "$fn"
@@ -654,11 +654,11 @@ do_basebackup() {
     trap "rm -f $tmpfn && rmdir '$LOCK' > /dev/null 2>&1" INT TRAP QUIT ABRT TERM EXIT # clean up on error
 
     [ -f "$fn" ] && error "Basebackup $fn already exists"
-    psql -c "SELECT pg_start_backup('$fn');" >/dev/null
+    psql -Xc "SELECT pg_start_backup('$fn');" >/dev/null
     $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' ./backup_label . || status=$?
 
     # NOTE: We don't want to see any NOTICE messages here, but error messages...
-    PGOPTIONS='--client-min-messages=WARNING' psql -c "SELECT pg_stop_backup();" 1>/dev/null
+    PGOPTIONS='--client-min-messages=WARNING' psql -Xc "SELECT pg_stop_backup();" 1>/dev/null
 
     if [ $status -eq 0 ] || [ $status -eq 1 ]; then # exit 1 is "some files changed"
 	mv "$tmpfn" "$fn"
@@ -905,10 +905,10 @@ _create_snapshot_LVM() {
         label="LVM SNAPSHOT $(timestamp)"
     fi
 
-    psql -c "SELECT pg_start_backup('$label');" >/dev/null
+    psql -Xc "SELECT pg_start_backup('$label');" >/dev/null
     sudo lvcreate -s -n "$lvm_snap_name" -L "$lvm_size" "$lvm_vol" || status=$?
 
-    psql -c "SELECT pg_stop_backup();" >/dev/null
+    psql -Xc "SELECT pg_stop_backup();" >/dev/null
     [ $status -ne 0 ] && echo "LVM snapshot failed with status $status" && return $status
 
     ## mount the snapshot in the archive directory LVM snapshot mountpoint
