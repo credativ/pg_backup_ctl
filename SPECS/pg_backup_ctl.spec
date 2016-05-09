@@ -25,7 +25,7 @@ Script to manage and perform online backups with PostgreSQL databases.
 install -d %{buildroot}/%{_bindir}/
 install -d %{buildroot}/%{_docdir}/%{toolname}
 install -m 0755 pg_backup_ctl %{buildroot}/%{_bindir}/
-install -m 644  README        %{buildroot}%{_docdir}/%{toolname}/
+install -m 644  README.md     %{buildroot}%{_docdir}/%{toolname}/
 install -d %{buildroot}%{_sysconfdir}/bash_completion.d/
 install -m 644  pg-backup-ctl.bash-completion %{buildroot}%{_sysconfdir}/bash_completion.d/
 
@@ -40,7 +40,7 @@ rm -rf %{buildroot}
 %files
 %defattr(-,root,root,-)
 %{_bindir}/pg_backup_ctl
-%{_docdir}/%{toolname}/README
+%{_docdir}/%{toolname}/README.md
 %{_sysconfdir}/bash_completion.d/
 
 %changelog
