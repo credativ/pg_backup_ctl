@@ -107,14 +107,14 @@ Remove an LVM snapshot created with create\-lvmsnapshot (requires
 \f[B]\-M\f[] and \f[B]\-n\f[]).
 .SS restore \f[I]BASEBACKUP\f[]
 .PP
-Restores \f[I]basebackup\f[] into the directory specified by the
+Restores \f[I]BASEBACKUP\f[] into the directory specified by the
 \f[B]\-D\f[] parameter.
 This directory must already exist and be empty.
 In case the backup contains tablespaces, the respective target
 directories need to exist and be empty.
 .PP
 The destination directory will also contain a generated
-\f[B]recovery.conf\f[], suitable to start a PostgreSQL instance for
+\f[B]recovery.conf\f[], suitable for starting a PostgreSQL instance for
 recovery immediately.
 .PP
 It is still possible to do the recovery process completely manually.
@@ -162,7 +162,7 @@ The following command\-line options control actions done by
 .PP
 The directory which will contain all backup files, configuration files
 and history files.
-This parameter is required for all modes.
+This parameter is required for all commands.
 .SS \-D \f[I]DATADIR\f[]
 .PP
 PostgresSQL data directory.
