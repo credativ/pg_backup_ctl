@@ -14,7 +14,7 @@ pg_backup_ctl - Utility to back up and recover a running PostgresSQL database se
 
 # DESCRIPTION
 
-**pg_backup_ctl** is a tool to simplify the steps needed to make a full transaction log archival backup of PostgreSQL clusters. All steps performed by this script can also be done manually. See http://www.postgresql.org/docs/9.5/interactive/continuous-archiving.html for details. Furthermore, this script implements several functions to prepare for backups using LVM snapshots.
+**pg_backup_ctl** is a tool to simplify the steps needed to make a full transaction log archival backup of PostgreSQL clusters. All steps performed by this script can also be done manually. See http://www.postgresql.org/docs/current/static/continuous-archiving.html for details. Furthermore, this script implements several functions to prepare for backups using LVM snapshots.
 
 Whenever you call **pg_backup_ctl**, you need to issue a _COMMAND_, which specifies what actions will be taken, and an _ARCHIVEDIR_, which specifies **pg_backup_ctl**'s working directory - which is where backups will be placed and from where they will be restored. Note that for almost all commands, the PostgreSQL server needs to be running.
 
