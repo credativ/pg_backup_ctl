@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -eux
+
+# free port 5432 on this system
+service postgresql stop || :
+
+cd tests
+
+for v in $(pg_buildext supported-versions); do
+  ./backup-test.sh -y $v
+done

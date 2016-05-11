@@ -22,4 +22,3 @@ Description: backup and recover PostgreSQL using log archiving
  pg_backup_ctl is a tool to simplify the steps needed to make a full
  transaction log archival backup of PostgreSQL clusters to enable
  Point-in-Time Recovery (PITR).
-

@@ -1,0 +1,3 @@
+Depends: @, postgresql-9.5, postgresql-server-dev-all, rsync
+Tests: testsuite
+Restrictions: allow-stderr, needs-root
