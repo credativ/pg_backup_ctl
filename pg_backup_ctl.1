@@ -186,11 +186,10 @@ will be backed up before being deleted.
 When specified with the \f[B]setup\f[] command, \f[B]archive_command\f[]
 will be configured to use \f[B]gzip\f[] to compress archived WAL
 segments.
-.SS \-l \f[I]LOCKDIR\f[]
+.SS \-l \f[I]LOCKFILE\f[]
 .PP
-Place \f[B]pg_backup_ctl\f[]\[aq]s lock file in the specified directory
-(if not specified, the lock file will be placed inside
-\f[I]ARCHIVEDIR\f[]).
+Use lock file to protect against concurrent operation (default is
+\f[I]ARCHIVEDIR\f[]\f[B]/.lock\f[]).
 .SS \-L \f[I]LVMSIZE\f[]
 .PP
 Sets the buffer size for an LVM snapshot.

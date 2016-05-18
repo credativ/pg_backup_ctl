@@ -132,9 +132,9 @@ When specified with the **cleanup** command, old archive log files will be backe
 
 When specified with the **setup** command, **archive_command** will be configured to use **gzip** to compress archived WAL segments.
 
-## -l _LOCKDIR_
+## -l _LOCKFILE_
 
-Place **pg_backup_ctl**'s lock file in the specified directory (if not specified, the lock file will be placed inside _ARCHIVEDIR_).
+Use lock file to protect against concurrent operation (default is _ARCHIVEDIR_**/.lock**).
 
 ## -L _LVMSIZE_
 

@@ -143,8 +143,7 @@ Options:
                 all tablespaces into one directory)
   -m            archive old log files before deleting them (used with cleanup)
   -z            use gzip to compress archived WAL segments (used with setup)
-  -l LOCKDIR    Place pg_backup_ctl's lock file in the specified directory
-                (default is ARCHIVEDIR)
+  -l LOCKFILE   lock file location (default is ARCHIVEDIR/.lock)
 LVM snapshot control:
   -L LVMSIZE    determines the buffer size for an LVM snapshot
   -M VOLUME     LVM volume identifier to create the snapshot on
@@ -327,11 +326,16 @@ check_archivedir() {
         error "no write access to archive directory \"$archivedir\""
     fi
 
+    # Migrate from 0.8 and earlier default lock file location
+    if [ -z "${LOCK:-}" ] && [ -f "$archivedir/pg_backup_ctl.base.lock" ]; then
+        mv -f "$archivedir/pg_backup_ctl.base.lock" "$archivedir/.lock"
+    fi
+
     ## Force LOCK file to be in $archivedir. This fixes an issue on
     ## some Linux systems, where /var/lock/ isn't writeable by daemons.
     ## $archivedir must be writable by the postgres user anyway, so we
     ## assume we can use it for the lock file, too.
-    LOCK=${LOCK:-"$archivedir/pg_backup_ctl.base.lock"}
+    LOCK=${LOCK:-"$archivedir/.lock"}
 
 }
 
@@ -1435,3 +1439,5 @@ case $mode in
     *)
         error "invalid command: \"$mode\"";;
 esac
+
+# vim:sw=4:et
