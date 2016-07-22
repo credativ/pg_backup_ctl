@@ -71,45 +71,8 @@ Supports PostgreSQL 8.3 and above
 Usage: $me -A ARCHIVEDIR [OPTIONS...] COMMAND
 
 Commands:
-  setup          Prepare server for transaction log archival
-
   basebackup     Perform a base backup (this won't work when using tablespaces; 
                  use streambackup instead)
-
-  lvmbasebackup  Perform a base backup using an LVM snapshot (requires -L, -M, 
-                 -n, -N)
- 
-  create-lvmsnapshot
-                 Create an LVM snapshot for an external backup command
-                 (requires -L -M -n -N)
-
-  rsyncbackup    Perform a base backup with rsync. This also saves backup space
-                 in case multiple rsync basebackups are used by hardlinking
-                 unchanged files. If a retention policy > 1 is used, then
-                 unchanged files are just allocated once in the base backup
-                 repository. See the --link-dest parameter in the rsync
-                 documentation for details.
-
-  streambackup   Perform a streaming base backup.
-
-                 This command requires PostgreSQL 9.1 and above and 
-                 pg_basebackup accessible via PATH. The server should be 
-                 configured to allow streaming replication connections.
-
-  remove-lvmsnapshot
-                 Remove an LVM snapshot created with create-lvmsnapshot 
-                 (requires -M and -n)
-
-  restore BASEBACKUP
-                 Restores the specified BASEBACKUP into the directory specified 
-                 by the -D parameter. The directory must already exist and be 
-                 empty. In case the backup contains tablespaces, the respective 
-                 target directories need to exist and be empty. The destination 
-                 directory will also contain a generated recovery.conf, suitable
-                 for starting a PostgreSQL instance for recovery immediately.
-
-  currentbackup  Back up the current WAL file and remove old WAL backups (run 
-                 from cron job)
 
   cleanup [ BASEBACKUP | XLOG | +N ]
                  Remove old base backups and WAL files (run from cron job)
@@ -130,10 +93,47 @@ Commands:
                  not needed by this base backup and all older base backups will 
                  be removed.
 
+  create-lvmsnapshot
+                 Create an LVM snapshot for an external backup command
+                 (requires -L -M -n -N)
+
+  currentbackup  Back up the current WAL file and remove old WAL backups (run 
+                 from cron job)
+
   ls[+]          Lists available base backups and their size in the current 
                  archive. When issued with +, the ls command will examine the 
                  WAL archive and display the minimum WAL segment file required 
                  to use the backup to perform a full recovery.
+
+  lvmbasebackup  Perform a base backup using an LVM snapshot (requires -L, -M, 
+                 -n, -N)
+
+  rsyncbackup    Perform a base backup with rsync. This also saves backup space
+                 in case multiple rsync basebackups are used by hardlinking
+                 unchanged files. If a retention policy > 1 is used, then
+                 unchanged files are just allocated once in the base backup
+                 repository. See the --link-dest parameter in the rsync
+                 documentation for details.
+
+  remove-lvmsnapshot
+                 Remove an LVM snapshot created with create-lvmsnapshot 
+                 (requires -M and -n)
+
+  restore BASEBACKUP
+                 Restores the specified BASEBACKUP into the directory specified 
+                 by the -D parameter. The directory must already exist and be 
+                 empty. In case the backup contains tablespaces, the respective 
+                 target directories need to exist and be empty. The destination 
+                 directory will also contain a generated recovery.conf, suitable
+                 for starting a PostgreSQL instance for recovery immediately.
+
+  setup          Prepare server for transaction log archival
+
+  streambackup   Perform a streaming base backup.
+
+                 This command requires PostgreSQL 9.1 and above and 
+                 pg_basebackup accessible via PATH. The server should be 
+                 configured to allow streaming replication connections.
 
 Options:
   -A ARCHIVEDIR archival target directory (required)
