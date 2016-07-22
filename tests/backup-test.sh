@@ -325,9 +325,8 @@ if [ -z "$*" ]; then
 	versions="9.5 9.4 9.3 9.2 9.1 9.0 8.4"
 else
 	versions="$*"
+	shift
 fi
-
-shift
 
 if [ ${interactive} -gt 0 ]; then
 	read -p "Welcome to the automated pg_backup_ctl testing environment! Note: this script will overwrite the Postgres cluster \"${test_cluster}\". Continue? (y/n) " confirm
