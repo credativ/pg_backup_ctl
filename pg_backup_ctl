@@ -1101,7 +1101,7 @@ do_unpin() {
             ## basebackup_2
             ## basebackup_3
             ##
-            ## pin +2:
+            ## pin +3:
             ##
             ## basebackup_1
             ## basebackup_2
@@ -1227,7 +1227,7 @@ do_pin() {
             ## basebackup_2
             ## basebackup_3
             ##
-            ## pin +2:
+            ## pin +3:
             ##
             ## basebackup_1
             ## basebackup_2
@@ -1278,7 +1278,7 @@ do_pin() {
 # and *not* pinned. The specified list of basebackups
 # need to be sorted in temporal descending order
 #
-# (see _get_basebackup_deletion_candidates() for details)
+# (see _get_basebackups_to_keep() for details)
 _delete_basebackups() {
     local retention_policy=$1 && shift
     local candidates="$@"
@@ -1287,7 +1287,6 @@ _delete_basebackups() {
     for i in $candidates; do
 
         retention_applied=$(($retention_applied + 1))
-        echo "$i: retention applied $retention_applied/$retention_policy"
 
         if [ $retention_applied -gt $retention_policy ] && [ $(_is_pinned $(basename $i)) = 'N' ]; then
             notice "deleting basebackup \"$i\""
@@ -1482,6 +1481,10 @@ do_cleanup() {
             ##
             ## - Remove all basebackups outside the retention policy
             ## - Clean all WAL segments older than the oldest basebackup
+            ##
+            ## NOTE: Deleting base backups *before* recursively calling
+            ##       do_cleanup() to cleanup unneeded WALs might cause
+            ##       some output noise, currently.
             ##
 
 
