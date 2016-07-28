@@ -18,7 +18,7 @@ _pg_backup_ctl()
 
     # supported tasks
     tasks="setup basebackup lvmbasebackup streambackup rsyncbackup create-lvmsnapshot \
-            remove-lvmsnapshot restore currentbackup cleanup ls ls+"
+            remove-lvmsnapshot restore currentbackup cleanup ls ls+ pin unpin"
 
     # options
     opts="-A -D -m -z -l -L -M -n -N -o -h -p -U"
@@ -49,7 +49,11 @@ _pg_backup_ctl()
             COMPREPLY=( $(compgen -W "${basic_mount_opts}" ${cur}) )
             return 0
             ;;
+        pin)
+            ;&
         restore)
+            ;&
+        unpin)
             # return a list of basebackups
             local basebackups
 

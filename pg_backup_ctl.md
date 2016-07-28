@@ -108,6 +108,50 @@ If no argument is specified, **cleanup** will use the latest base backup as its 
 
 Lists available base backups and their size in the current archive. When issued with **+**, the **ls** command will examine the WAL archive and display the minimum WAL segment file required to use the backup to perform a full recovery.
 
+## pin _BASEBACKUP_ | _earliest_ | _latest_ | _+N_
+
+The **pin** command pins the specified base backup. This causes
+the cleanup command to keep all required files for restoring
+this basebackup including WAL segment files, even if the
+specified retention policy would have elected this backup
+for eviction. If the base backup is already pinned, this 
+command is a noop.
+
+The **pin** command supports three argument types: 
+
+The first one is the name of the base backup to be pinned.
+
+The second form uses a relative number _N_ to pin the nth current
+base backup, regardless of its name. E.g, if the catalog
+contains three basebackups, "pin +2" will pin the 2nd
+basebackup in the list. Please note that the positional argument
+requires the _+_ literal.
+
+The last form accepts the argument string _earliest_ or
+_latest_. The first pins the eldest existing base backup in the
+archive, the latter the most recent one respectively.
+
+## unpin _BASEBACKUP_ | _earliest_ | _latest_ | _+N_
+
+The **unpin** command removes a previously added pin from
+the specified base backup. unpin is a noop, if the specified
+base backup wasn't pinned yet, though a warning is printed to
+STDERR.
+
+The **unpin** command supports three forms of argument types:
+
+The first is the name of the basebackup to be unpinned.
+
+The second format is a number _+N_ which will unpin the _N_th base
+backup in the list. E.g. "unpin +2" will unpin the 2nd base
+backup. Please note that the positional argument
+requires the _+_ literal.
+
+The last form accepts the argument string _earliest_ or
+_latest_. The first unpins the eldest existing base backup
+in the archive, the latter the most recent one respectively.
+
+
 # OPTIONS
 
 The following command-line options control actions done by **pg_backup_ctl**.

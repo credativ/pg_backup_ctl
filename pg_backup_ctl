@@ -30,7 +30,7 @@
 ##
 ## pg_backup_ctl - PostgreSQL transaction log archival backup control program
 ##
-## Version: 0.8
+## Version: 0.9
 
 set -e
 umask 077
@@ -108,6 +108,29 @@ Commands:
   lvmbasebackup  Perform a base backup using an LVM snapshot (requires -L, -M, 
                  -n, -N)
 
+  pin            BASEBACKUP | latest | earliest | +N
+
+                 The pin command pins the specified base backup. This causes
+                 the cleanup command to keep all required files for restoring
+                 this basebackup including WAL segment files, even if the
+                 specified retention policy would have elected this backup
+                 for eviction. If the base backup is already pinned, this 
+                 command is a noop.
+
+                 The pin command supports three argument types: 
+
+                 The first one is the name of the base backup to be pinned.
+ 
+                 The second form uses a relative number to pin the nth current
+                 base backup, regardless of its name. E.g, if the catalog
+                 contains three basebackups, "pin +2" will pin the 2nd
+                 basebackup in the list. The '+' literal is mandatory in this
+                 case.
+
+                 The last form accepts the argument string "earliest" or
+                 "latest". The first pins the eldest existing base backup in the
+                 archive, the latter the most recent one respectively.
+
   rsyncbackup    Perform a base backup with rsync. This also saves backup space
                  in case multiple rsync basebackups are used by hardlinking
                  unchanged files. If a retention policy > 1 is used, then
@@ -134,6 +157,23 @@ Commands:
                  This command requires PostgreSQL 9.1 and above and 
                  pg_basebackup accessible via PATH. The server should be 
                  configured to allow streaming replication connections.
+
+  unpin          BASEBACKUP | earliest | latest | +N
+
+                 The unpin command removes a previously added pin from
+                 the specified base backup. unpin is a noop, if the specified
+                 base backup wasn't pinned yet.
+
+                 The unpin command supports three forms of argument types:
+
+                 Thefirst is the name of the basebackup to be unpinned. The
+                 second format is a number N which will unpin the Nth base
+                 backup in the list. E.g. "unpin +2" will unpin the 2nd base
+                 backup. The '+' literal is mandatory in this case.
+
+                 The last form accepts the argument string "earliest" or
+                 "latest". The first unpins the eldest existing base backup
+                 in the archive, the latter the most recent one respectively.
 
 Options:
   -A ARCHIVEDIR archival target directory (required)
@@ -1003,6 +1043,316 @@ stop_wal_location() {
     $SED -n -r '/^STOP WAL LOCATION:/s/^.*file ([0-9A-F]{24}).*$/\1/p'
 }
 
+do_unpin() {
+    local bn pin
+
+    case "$1" in
+
+        *backup_*)
+            bn="$archivedir"/base/"$1"
+            pin="$archivedir"/base/."$1".pin
+
+            # Check if the specified basebackup really exists
+            if ! basebackup_exists $bn ; then
+                error "Basebackup \"$bn\" does not exist"
+                exit 1
+            fi
+
+            ;;
+
+        earliest)
+            ##
+            ## The 'earliest' argument pins the oldest available
+            ## basebackup in the current list. We don't use the
+            ## backup history files, since 'earliest' means "unpin
+            ## the eldest existing basebackup" !
+            ##
+            bn=$(_get_earliest_physical_backup)
+
+            if ! basebackup_exists "$bn"; then
+                error "base backup \"$bn\" doesn't seem to exist!"
+            fi
+            pin="$archivedir"/base/."$(basename $bn)".pin
+
+            ;;
+        latest)
+            ##
+            ## The 'latest' argument pins the oldest available
+            ## basebackup in the current list. We don't use the
+            ## backup history files, since 'latest' means "unpin
+            ## the most current existing basebackup" !
+            ##
+            bn=$(_get_latest_physical_backup)
+
+            if ! basebackup_exists "$bn"; then
+                error "base backup \"$bn\" doesn't seem to exist!"
+            fi
+            pin="$archivedir"/base/."$(basename $bn)".pin
+
+            ;;
+        +[1-9]*)
+
+            ## A argument of +[NUMBER] means that we have
+            ## to pin the nth current basebackup, e.g.
+            ##
+            ## Before:
+            ##
+            ## basebackup_1
+            ## basebackup_2
+            ## basebackup_3
+            ##
+            ## pin +2:
+            ##
+            ## basebackup_1
+            ## basebackup_2
+            ## basebackup_3 -> *pinned*
+            ##
+
+            ## Getting the nth basebackup isn't as simple as in do_pin():
+            ## The list of basebackups can hold entries, which are already
+            ## deleted, and thus cannot be retrieved from the base/
+            ## archive directory directly.
+            ##
+            ## Retrieve the basebackup list in temporal descending
+            ## order.
+
+            history=$(ls -t $archivedir/log/[0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup* 2> /dev/null || return 0)
+	    # base_backups="$(ls -td "$archivedir"/base/*backup_* 2>/dev/null)"
+            hf=$(_get_nth_from_list ${1//[a-zA-Z+-]/} $history)
+            bn=$(cat "$hf" | gunzip -f -c | backup_label)
+
+            # at least, the pin file...
+            pin="$archivedir"/base/."$(basename $bn)".pin
+
+            ;;
+        *)
+            error "unrecognized option for unpin command: \"$1\""
+            ;;
+    esac
+
+    # Give a warning message if the specified basebackup
+    # wasn't yet pinned.
+    if [ $(_is_pinned $(basename $bn)) = 'N' ]; then
+        warn "Basebackup \"$bn\" is not pinned yet"
+        exit 0
+    fi
+
+    rm "$pin"
+}
+
+##
+## Get the latest existing base backup
+## from the directory list directly
+##
+## The return base backup is fully qualified or empty
+## in case there isn't one.
+##
+_get_latest_physical_backup() {
+
+    local base_backups=$(ls -td "$archivedir"/base/*backup_* 2>/dev/null)
+    bn=$(_get_first_from_list $base_backups)
+
+    echo "$bn"
+
+}
+
+##
+## Get the earliest base backup
+## from the directory list directly
+##
+## The return base backup is fully qualified or empty
+## in case there isn't one.
+##
+_get_earliest_physical_backup() {
+
+    local base_backups=$(ls -td "$archivedir"/base/*backup_* 2>/dev/null)
+    bn=$(_get_last_from_list $base_backups)
+
+    echo "$bn"
+
+}
+
+do_pin() {
+
+    local bn pin
+
+    case "$1" in
+
+        *backup_*)
+            bn="$archivedir"/base/"$1"
+            pin="$archivedir"/base/."$1".pin
+
+            ;;
+
+        earliest)
+            ##
+            ## The 'earliest' argument pins the oldest available
+            ## basebackup in the current list. We don't use the
+            ## backup history files, since 'earliest' means unpin
+            ## the eldest existing basebackup" !
+            ##
+            bn=$(_get_earliest_physical_backup)
+
+            if ! basebackup_exists "$bn"; then
+                error "base backup \"$bn\" doesn't seem to exist!"
+            fi
+            pin="$archivedir"/base/."$(basename $bn)".pin
+
+            ;;
+        latest)
+            
+            ##
+            ## The 'latest' argument pins the oldest available
+            ## basebackup in the current list. We don't use the
+            ## backup history files, since 'latest' means "pin
+            ## the most current existing basebackup" !
+            ##
+            bn=$(_get_latest_physical_backup)
+
+            if ! basebackup_exists "$bn"; then
+                error "base backup \"$bn\" doesn't seem to exist!"
+            fi
+            pin="$archivedir"/base/."$(basename $bn)".pin
+
+            ;;
+
+        +[1-9]*)
+
+            ## A argument of +[NUMBER] means that we have
+            ## to pin the nth current basebackup, e.g.
+            ##
+            ## Before:
+            ##
+            ## basebackup_1
+            ## basebackup_2
+            ## basebackup_3
+            ##
+            ## pin +2:
+            ##
+            ## basebackup_1
+            ## basebackup_2
+            ## basebackup_3 -> *pinned*
+            ##
+
+            ## Getting the nth basebackup cannot rely on the
+            ## directory list in base/, since there might be deleted
+            ## basebackups in the history we need to consider.
+            ##
+            ## Retrieve the basebackup list in temporal descending
+            ## order.
+
+            ## Get list of backup history files, might be expensive...
+            history=$(ls -t $archivedir/log/[0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup* 2> /dev/null || return 0)
+
+            # Extract Nth backup history file from the list
+            hf=$(_get_nth_from_list ${1//[a-zA-Z+-]/} $history)
+
+            if [ -z "$hf" ]; then
+                error "pin target out of range: \"$1\""
+            fi
+
+            # Get the basebackup label...
+            bn=$(cat "$hf" | gunzip -f -c | backup_label)
+
+            # at least, the pin file...
+            pin="$archivedir"/base/."$(basename $bn)".pin
+
+            ;;
+
+        *)
+            error "unrecognized option for pin command: \"$1\""
+    esac
+
+    if ! basebackup_exists $bn ; then
+        error "Basebackup \"$bn\" does not exist"
+        exit 1
+    fi
+
+    # Try to create the PIN file.
+    touch "$pin" || return 1
+}
+
+#
+# Delete all basebackups from the list
+# which are older than the specified retention policy
+# and *not* pinned. The specified list of basebackups
+# need to be sorted in temporal descending order
+#
+# (see _get_basebackup_deletion_candidates() for details)
+_delete_basebackups() {
+    local retention_policy=$1 && shift
+    local candidates="$@"
+    local retention_applied=0
+
+    for i in $candidates; do
+
+        retention_applied=$(($retention_applied + 1))
+        echo "$i: retention applied $retention_applied/$retention_policy"
+
+        if [ $retention_applied -gt $retention_policy ] && [ $(_is_pinned $(basename $i)) = 'N' ]; then
+            notice "deleting basebackup \"$i\""
+            rm -r "$i"
+        fi
+    done
+}
+
+#
+# Get a list of basebackups reflecting
+# the specified retention policy and any
+# backup pins. The returned list is sorted
+# in temporal descending order.
+#
+_get_basebackups_to_keep() {
+
+    local retention_policy="$1" && shift;
+    local bb="$@"
+    local candidates=""
+    local retention_applied=0
+
+    for i in $bb; do
+
+        ## Retention policy reached?
+        if [ $retention_applied -lt $retention_policy ] || [ $(_is_pinned $(basename $i)) = 'Y' ]; then
+
+            ##
+            ## Add the basebackup to the candidates. We also
+            ## consider pinned basebackups for deletion, but
+            ## do_cleanup() will recheck any pins for deletion
+            ## and refuse any actions on them.
+            ##
+            candidates="$candidates $i"
+
+        fi
+
+        retention_applied=$(($retention_applied + 1))
+
+    done
+
+    ## ...must be a list
+    echo $candidates
+}
+
+_get_last_from_list() {
+    local _list="$@"
+
+    set -- $_list
+    echo ${@: -1}
+}
+
+_get_first_from_list() {
+    local _list="$@"
+    
+    set -- $_list
+    echo $1
+}
+
+_get_nth_from_list() {
+    local n=$1 && shift
+    local _list="$@"
+
+    set -- $_list
+    eval echo "\${$n}"
+}
 
 do_cleanup() {
     local first_wal last_wal x
@@ -1077,8 +1427,63 @@ do_cleanup() {
 
             ## NOTE: We need to consider both, traditional tar files and
             ## streamed backups here.
-	    local base_backups=$(ls -tdr "$archivedir"/base/*backup_* 2>/dev/null)
+	    local base_backups=$(ls -td "$archivedir"/base/*backup_* 2>/dev/null)
 	    local num_backups=$(echo "$base_backups" | wc -l)
+
+            ##
+            ## We might have a cleanup retention policy which
+            ## forces us to "drill" wholes into the list of
+            ## current available base backups. This is because we
+            ## support the notion of pinned backups, which are required
+            ## to be kept as long as they appear pinned. Consider the
+            ## following scenario:
+            ## 
+            ## basebackup_1
+            ## basebackup_2
+            ## basebackup_3 -> *pinned*
+            ##
+            ## If a cleanup retention policy of '+1' is specified now, this
+            ## should result in the following list of basebackups:
+            ##
+            ## basebackup_1
+            ## basebackup_3 -> *pinned*
+            ##
+            ## This is because a cleanup retention policy of '+1'
+            ## effectively means to keep *at least* one available
+            ## basebackup, *plus* any pinned ones.
+            ##
+            ## To implement this behavior we have to fulfill the following
+            ## steps:
+            ##
+            ## 1) _get_basebackups_to_keep() generates a 
+            ##    list of basebackups in descending order down to
+            ##    the specified retention policy *plus* any pinned
+            ##    basebackups (which can also be older that the specified
+            ##    retention policy and appear later in the list than the
+            ##    retention policy allows).
+            ##
+            ## 2) Since the list _get_basebackups_to_keep() generated
+            ##    for us also holds any pinned basebackups even older than the
+            ##    requested retention policy, it's important to get the oldest
+            ##    basebackup to keep from the last item from this list.
+            ##
+            ## 3) We need to delete all other *unpinned* basebackup outside
+            ##    of the retention policy. We do this *before* recursively calling
+            ##    do_cleanup() with the oldest basebackup to keep, to make
+            ##    sure all basebackups are cleaned up, too.
+            ##
+            ## 4) The oldest basebackup to keep is the basebackup identifier
+            ##    we pass to do_cleanup() recursively, so that any WAL segment
+            ##    files *older* than this basebackup are cleaned up. Any newer WAL
+            ##    segment are still used by this oldest basebackup and need to
+            ##    be kept.
+            ##
+            ## So effectively, the cleanup <RETENTION> code performs a 2-phase cleanup:
+            ##
+            ## - Remove all basebackups outside the retention policy
+            ## - Clean all WAL segments older than the oldest basebackup
+            ##
+
 
 	    if [ $num_backups -le $retention_policy ]; then
 		echo "no base backups to delete found"
@@ -1087,9 +1492,25 @@ do_cleanup() {
 		local candidates
 		local newest_candidate
 
-		candidates=$(echo "$base_backups" | head -n $(($num_backups - $retention_policy)))
-		oldest_keep=$(echo "$base_backups" | head -n $(($num_backups - $retention_policy + 1)) | $TAIL -n1)
-		newest_candidate=$(echo "$candidates" | $TAIL -n1)
+                ##
+                ## We need to examine the whole list of directory entries for any basebackup
+                ## in the archive. There might be pinned basebackups which need to be kept.
+                ## This might be expensive for long directory entries, but i don't think
+                ## the list will be extra large since no one wants to keep dozen of hundreds
+                ## of basebackups...
+                ##
+                keep="$(_get_basebackups_to_keep $retention_policy $base_backups)"
+                oldest_keep=$(echo $(_get_last_from_list "$keep"))
+		newest_candidate=$(echo $(_get_first_from_list "$keep"))
+
+                echo "OLDEST KEEP: $oldest_keep"
+                echo "NEWEST CANDIDATE: $newest_candidate"
+                echo "CANDIDATES: $keep"
+
+                ## Delete any basebackups from the list of candidates
+                ## which aren't pinned and older than the requested
+                ## retention policy.
+                _delete_basebackups $retention_policy $base_backups
 
 		## This recurses into cleanup and removes all WAL files
 		## belonging to the list of candidates. Those aren't required
@@ -1152,13 +1573,18 @@ do_cleanup() {
             basebackup_exists $i
             rc=$?
 
+            if [ "$(_is_pinned $1)" = "Y" ]; then
+                notice "Skipping pinned basebackup \"${fn}\""
+                continue
+            fi
+
             if [ $rc -eq 0 ]; then
                 notice "deleting base backup \"$i\""
                 rm -r "$i"
             elif [ $rc -lt 1 ]; then
                 warn "LVM snapshot \"$i\" skipped"
             else
-                warn "base backup \"$i\" does not exist, ignored"
+                warn "base backup \"$i\" already deleted"
             fi
 
         done
@@ -1177,6 +1603,7 @@ do_cleanup() {
 basebackup_exists() {
 
     local fn="$(basename $1)"
+    local dn="$(dirname $1)"
     local rc=1
 
     case ${fn} in
@@ -1213,6 +1640,24 @@ _get_size() {
     fi
 
     echo -n $basesize
+}
+
+##
+## Returns Y if the specified basebackup is
+## pinned.
+##
+_is_pinned() {
+    local fn="$archivedir"/base/"$1"
+    local pin="$archivedir"/base/."$(basename $fn)".pin
+    local pinned="N"
+
+    if [ -e "$fn" ]; then
+        if stat $pin > /dev/null 2>&1; then
+            pinned="Y"
+        fi
+    fi
+
+    echo -n $pinned
 }
 
 ##
@@ -1296,14 +1741,14 @@ _backup_has_tablespaces() {
 ## run_with_lock() for details.
 do_ls() {
 
-    local backups basesize total_basesize wallogsize walcount
+    local backups basesize total_basesize wallogsize walcount pinned
 
     backups=$(ls -t $archivedir/log/[0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup* 2> /dev/null || return 0)
 
     if [ -z "$1" ]; then
-        printf "%-51s\t%-9s\n" "Basebackup Filename" "Size"
+        printf "%-53s\t%-9s\t%-3s\n" "Basebackup Filename" "Size" "Pin"
     else
-        printf "%-33s %-9s %-24s %-9s\n" "Basebackup Filename" "Size" "Required WAL" "Available"
+        printf "%-35s %-9s %-3s %-24s %-9s\n" "Basebackup Filename" "Size" "Pin" "Required WAL" "Available"
     fi
 
     echo $hdrline
@@ -1334,8 +1779,10 @@ do_ls() {
 
         esac
 
+        pinned=$(_is_pinned "$fn")
+
         if [ -z "$1" ]; then
-            printf "%-51s\t%-9s\n" "$fn" $basesize
+            printf "%-53s\t%-9s\t%-3s\n" "$fn" $basesize $pinned
         elif [ "$1" = "+" ]; then
 
             local wal_avail='YES'
@@ -1346,7 +1793,7 @@ do_ls() {
 
             (test -f "$archivedir/log/$first_wal" || test -f "$archivedir/log/$first_wal.gz") || export wal_avail='NO'
             _backup_has_tablespaces "$fn" && export has_tablespaces="YES"
-            printf "%-33s %-9s %-24s %-9s\n" "$fn" $basesize $first_wal $wal_avail
+            printf "%-35s %-9s %-3s %-24s %-9s\n" "$fn" $basesize $pinned $first_wal $wal_avail
             printf "\`- %-24s\n" $(basename $x)
             if [ x"$has_tablespaces" = x"YES" ]; then
                 printf "\`- Tablespaces\n"
@@ -1421,6 +1868,14 @@ case $mode in
         ## ls command without any arguments accesses the
         ## filesystem only, thus no lock required
         do_ls
+        ;;
+    unpin)
+        check_archivedir
+        run_with_lock do_unpin "$@"
+        ;;
+    pin)
+        check_archivedir
+        run_with_lock do_pin "$@"
         ;;
     ls+)
         check_archivedir
