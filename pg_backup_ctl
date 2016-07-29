@@ -1506,10 +1506,6 @@ do_cleanup() {
                 oldest_keep=$(echo $(_get_last_from_list "$keep"))
 		newest_candidate=$(echo $(_get_first_from_list "$keep"))
 
-                echo "OLDEST KEEP: $oldest_keep"
-                echo "NEWEST CANDIDATE: $newest_candidate"
-                echo "CANDIDATES: $keep"
-
                 ## Delete any basebackups from the list of candidates
                 ## which aren't pinned and older than the requested
                 ## retention policy.
