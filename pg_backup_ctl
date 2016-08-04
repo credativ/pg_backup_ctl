@@ -1269,7 +1269,7 @@ do_pin() {
     fi
 
     # Try to create the PIN file.
-    touch "$pin" || return 1
+    touch "$pin"
 }
 
 #
@@ -1290,16 +1290,17 @@ _delete_basebackups() {
 
         if [ $retention_applied -gt $retention_policy ] && [ $(_is_pinned $(basename $i)) = 'N' ]; then
             notice "deleting basebackup \"$i\""
-            rm -r "$i"
+            rm -rf "$i"
         fi
     done
 }
 
 #
-# Get a list of basebackups reflecting
-# the specified retention policy and any
-# backup pins. The returned list is sorted
-# in temporal descending order.
+# Filter a list of basebackups according
+# to the specified retention policy and any
+# backup pins. Input has to be a list of
+# existing basebackups sorted in temporal
+# descending order.
 #
 _get_basebackups_to_keep() {
 
@@ -1353,59 +1354,209 @@ _get_nth_from_list() {
     eval echo "\${$n}"
 }
 
+#
+# Returns a list of predecessors of
+# the specified basebackup based on the given
+# WAL segment. The list is temporal sorted in
+# descending order.
+#
+# NOTE: _get_basebackup_predecessors() might
+#       return already deleted basebackups, but they
+#       might still be present in backup history files.
+#
+_get_basebackup_predecessors() {
+
+    local first_wal="$1"
+
+    # get a list of the backup history, starting with the given WAL segment
+    ls -td -1 "$archivedir"/log/*.backup | $SED -ne "/$first_wal/,\$ p" | xargs $SED -n -e '/^LABEL:/s/^LABEL://;s/^\s//p' | $TAIL -n+2
+
+}
+
+#
+# Filter out pinned basebackups from a given list.
+# The input sort order is preserved.
+#
+_filter_pinned_basebackups_from_list() {
+
+    local predecessors
+    local pinned
+
+    predecessors="$@"
+    [ -z "$predecessors" ] || (echo "" && return)
+
+    pinned=""
+
+    for i in $predecessors; do
+        if [ "$(_is_pinned $(basename $i))" = "Y" ]; then
+            pinned="$pinned $i"
+        fi
+    done
+
+    echo "$pinned"
+}
+
+#
+# Returns the first WAL segment of a given basebackup or
+# am empty list in case the basebackup cannot be found.
+_get_first_wal() {
+
+    local bb="$1"
+    local first_wal=""
+
+
+    # We need to consider the following different basebackup
+    # in the catalog:
+    #
+    # streaming base backup (base.tar.gz exists)
+    # rsync based backup (this is a plain PGDATA with a PG_VERSION file)
+    # (both above are stored as directories in the base/ directory
+    #
+    # and finally
+    #
+    # a plain or compressed tar.gz (stored directly in base/)
+    #
+    # Make sure we check for the correct backup_label file. tar basebackups
+    # include a separate backup_label file to make sure it occurs in the archive
+    # first.
+    #
+    # 
+
+    if [ -e "${archivedir}/base/${bb}/base.tar.gz" ]; then
+        first_wal=$(gunzip -c -f "${archivedir}/base/${bb}/base.tar.gz" | $TAR -f - -x --occurrence=1 -O backup_label | start_wal_location)
+        
+    elif [ -e "${archivedir}/base/${bb}/PG_VERSION" ]; then
+        first_wal=$(cat "${archivedir}/base/${bb}/backup_label" | start_wal_location)
+    elif [ -f "$archivedir/base/${bb}" ]; then
+        first_wal=$(gunzip -c -f "$archivedir/base/${bb}" | $TAR -f - -x --occurrence=1 -O ./backup_label | start_wal_location)
+    fi
+
+    echo $first_wal
+}
+
+#
+# Perform cleanup for the specified basebackup.
+#
+# If the second argument is specified and is the first
+# WAL segment required for cleanup, omit the steps to
+# retrieve the first required WAL segment for this basebackup.
+#
+# The first argument is the basebackup label to cleanup and
+# can be empty. In that case, the first WAL (2nd argument)
+# is mandatory.
+#
+_perform_basebackup_history_cleanup() {
+    local fn="$1"
+    local first_wal="$2"
+
+    if [ -z "$first_wal" ]; then
+        first_wal=$(_get_first_wal "$fn")        
+    fi
+
+    ##
+    ## Still no WAL segment we can start off?
+    ##
+    ## Error out if we can't get the first WAL segment (means likely the
+    ## basebackup doesn't exist, which is catched by _get_first_wal() anyhow...
+    [ -z "$first_wal" ] && error "Basebackup ${fn} does not exist, use cleanup <HISTORYFILE> to tidy up"
+
+    # Is there any predecessor?
+    predecessors=$(_get_basebackup_predecessors $first_wal)
+
+    ##
+    ## Delete any basebackups that are *NOT* pinned and older
+    ## than the current one.
+    ##
+    ## NOTE:
+    ##
+    ## We employ _delete_basebackups with a retention policy
+    ## of 0 since the list passed down to _delete_basebackups
+    ## already contains only those members potentially allowed
+    ## to delete.
+    ##
+    _delete_basebackups 0 $predecessors
+
+    pinned=$(_filter_pinned_basebackups_from_list $predecessors)
+    for i in $pinned; do
+        notice "basebackup is pinned and thus not removed: \"$(basename $i)\""
+        first_wal=$(_get_first_wal $(basename "$i"))
+        notice "trying next candidate based on WAL offset $first_wal"
+    done
+
+    ##
+    ## We need to return that last examined
+    ## WAL segment to indicate the correct position
+    ## for deletion
+    ##
+    echo $first_wal
+}
+
 do_cleanup() {
-    local first_wal last_wal x
+    local first_wal last_wal x predecessors
+
+    ##
+    ## DESCRIPTION OF CLEANUP PROCEDURE:
+    ##
+    ##   _perform_basebackup_history_cleanup() is used to clean up
+    ##   all basebackups which might be between the current selected
+    ##   cleanup target (basebackup, backup history file or retention policy)
+    ##   *and* the backup files we need to keep at *least*. The guts
+    ##   of the whole work is located in _perform_basebackup_history_cleanup().
+    ##
+    ##   An exception is cleanup <RETENTION POLICY>, since there we need to
+    ##   do the cleanup based on the numbers of basebackups to keep, which
+    ##   required a different logic in the past too (see also the comments
+    ##   in the branch below). To start with, a normal cleanup does its
+    ##   housekeeping the following way:
+    ##
+    ##   - Determine all predecessors for the given backup. We need to know
+    ##     the first WAL segment in the log archive which we need need
+    ##     to keep *at least*.
+    ##
+    ##   - Thus _perform_basebackup_history_cleanup iteratively traverses
+    ##     all predecessors and examines wether they are pinned. If true,
+    ##     the first WAL segment is assigned to contain the WAL segment
+    ##     required for this basebackup at least.
+    ##
+    ##   So by iteratively examing all predecessors of the given cleanup
+    ##   target we decrement the WAL segment (and so the logical position
+    ##   in the WAL stream where we start our deletion action).
+    ##
+    ##   Note again that cleanup +N has slightly different semantics, described
+    ##   in the comments below.
+    ##
 
     local fn=$(basename "$1")
     case $fn in
         rsync_backup_*)
             ## Fall through, same handler for streaming base backups...
             ;&
-        streaming_backup_*)
-
-            ##
-            ## If the basebackup is not there anymore, print a notice and
-            ## go further. We delete the archive logs anyways, since they don't
-            ## have any connection to an existing basebackup.
-            ##
-            ## Make sure we check for the correct backup_label file. tar basebackups
-            ## include a separate backup_label file to make sure it occurs in the archive
-            ## first.
-            ##
-            if [ -e "${archivedir}/base/${fn}/base.tar.gz" ]; then
-                first_wal=$(gunzip -c -f "${archivedir}/base/${fn}/base.tar.gz" | $TAR -f - -x --occurrence=1 -O backup_label | start_wal_location)
-            elif [ -e "${archivedir}/base/${fn}/PG_VERSION" ]; then
-                first_wal=$(cat "${archivedir}/base/${fn}/backup_label" | start_wal_location)
-            else
-                echo "Basebackup ${fn} does not exist, use cleanup <HISTORYFILE> to tidy up"
-            fi
-            ;;
         basebackup_*.tar*)
-
-            ##
-            ## If the basebackup is not there anymore, print a notice and
-            ## go further. We delete the archive logs anyways, since they don't
-            ## have any connection to an existing basebackup.
-            ##
-            if [ -e "$archivedir/base/${fn}" ]; then
-                first_wal=$(gunzip -c -f "$archivedir/base/${fn}" | $TAR -f - -x --occurrence=1 -O ./backup_label | start_wal_location)
-            else
-                echo "Basebackup $fn does not exist, use cleanup <HISTORYFILE> to tidy up"
-            fi
+            ;&
+        streaming_backup_*)
+            first_wal=$(_perform_basebackup_history_cleanup "$fn")
             ;;
         [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup)
             first_wal=$(cat "$archivedir/log/$1" 2>/dev/null | start_wal_location)
             last_wal=$(cat "$archivedir/log/$1" 2>/dev/null | stop_wal_location)
+
+            # Sanity check, backup complete?
             if [ ! -f "$archivedir"/log/$last_wal ]; then
                 error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
             fi
+
+            $first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
             ;;
         [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup.gz)
             first_wal=$(gunzip -c -f "$archivedir/log/$1" | start_wal_location)
             last_wal=$(gunzip -c -f "$archivedir/log/$1" | stop_wal_location)
+
+            # Sanity check, backup complete?
             if [ ! -f "$archivedir"/log/"$last_wal.gz" ]; then
                 error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
             fi
+
+            $first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
             ;;
         '')
             local last_backup
@@ -1416,10 +1567,13 @@ do_cleanup() {
                     break
                 fi
             done
+
             if [ -z "$last_backup" ]; then
                 error "no complete backup found"
             fi
+
             first_wal=$(gunzip -c -f "$last_backup" | start_wal_location)
+            first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
             ;;
 	+[1-9]*)
 	    local retention_policy=$1
@@ -1572,8 +1726,8 @@ do_cleanup() {
             basebackup_exists $i
             rc=$?
 
-            if [ "$(_is_pinned $1)" = "Y" ]; then
-                notice "Skipping pinned basebackup \"${fn}\""
+            if [ "$(_is_pinned $(basename $i))" = "Y" ]; then
+                notice "Skipping pinned basebackup \"${i}\""
                 continue
             fi
 
