@@ -37,7 +37,7 @@ RETENTION="+1"
 KEEPPINNED="+2 months"
 
 test $# -ge 2 || \
-    fail_with_message "Usage: $0 [daily|monthly] <cluster> (<confdir>)"
+    fail_with_message "Usage: $0 <daily|monthly> <cluster> [<confdir>]"
 
 TYPE=$1
 CLUSTER=$2
@@ -45,7 +45,7 @@ CONFDIR=${3:-/etc/pg_backup_ctl.d/}
 
 # Check the given type
 if [ $TYPE != "daily" ] && [ $TYPE != "monthly" ]; then
-    fail_with_message "ERROR: type not specified"
+    fail_with_message "ERROR: type must be 'daily' or 'monthly'"
 fi
 
 # Check if the confdir exists
@@ -79,9 +79,10 @@ if [ $TYPE = "monthly" ]; then
 
     # Check each backup, if its older then 2 months unpin it.
     for backup in $pinned; do
+        # rsync_backup_2016-08-05T143358 -> 2016-08-05 14:33:58
         backup_date=$(echo $backup | sed -n "s/.*_\(.*\)T\([0-9][0-9]\)\([0-9][0-9]\)\([0-9][0-9]\).*/\1 \2:\3:\4/p")
         if [ $(date -d "${backup_date} CEST ${KEEPPINNED}" +"%s") -lt $(date +"%s") ]; then
-            echo "UNPIN $backup (it's older then $KEEPPINNED)"
+            echo "UNPIN $backup (it's older than $KEEPPINNED)"
             $PGBACKUPCTL -A $PGARCHIVEDIR unpin $backup
         fi
     done
