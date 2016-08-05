@@ -25,85 +25,70 @@
 
 set -eu
 
+function fail_with_message ()
+{
+    echo "$*" 1>&2
+    exit 1
+}
+
 PGBACKUPCTL="pg_backup_ctl"
 BACKUPMETHOD="rsyncbackup"
 RETENTION="+1"
+KEEPPINNED="+2 months"
 
-if [ $# -lt 2 ]; then
-    echo "Usage: $1 [daily|monthly] <cluster> (<confdir>)" 1>&2
-    exit 127
-fi
+test $# -ge 2 || \
+    fail_with_message "Usage: $0 [daily|monthly] <cluster> (<confdir>)"
 
 TYPE=$1
 CLUSTER=$2
-CONFDIR=${3:-"/etc/pg_backup_ctl.d/"}
+CONFDIR=${3:-/etc/pg_backup_ctl.d/}
 
 # Check the given type
 if [ $TYPE != "daily" ] && [ $TYPE != "monthly" ]; then
-    echo "ERROR: type not specified" 1>&2
-    exit 1
+    fail_with_message "ERROR: type not specified"
 fi
 
 # Check if the confdir exists
-if [ ! -d "$CONFDIR" ]; then
-    echo "ERROR: configuration directory \"$CONFDIR\" does not exist" 1>&2
-    exit 2
-fi
+test -d "$CONFDIR" || \
+    fail_with_message "ERROR: configuration directory \"$CONFDIR\" does not exist"
 
 # Check if a cluster conf exists
-if [ ! -f "$CONFDIR/$CLUSTER.conf" ]; then
-    echo "ERROR: configuration file \"$CONFDIR/$CLUSTER.conf\" does not exist" 1>&2
-    exit 3
-fi
+test -f "$CONFDIR/$CLUSTER.conf" || \
+    fail_with_message "ERROR: configuration file \"$CONFDIR/$CLUSTER.conf\" does not exist"
 
 # If we reach this point all needed files should be in place.
 
 source "$CONFDIR/$CLUSTER.conf"
-rc=$?
-if [ $rc -ne 0 ]; then
-    echo "ERROR: could not source \"$CONFDIR/$CLUSTER.conf\"" 1>&2
-    exit 4
-fi
+test $? -eq 0 || \
+    fail_with_message "ERROR: could not source \"$CONFDIR/$CLUSTER.conf\""
 
-if [ -z "$PGARCHIVEDIR" ]; then
-    echo "ERROR: PGARCHIVEDIR not set" 1>&2
-    exit 5
-fi
+test -n "$PGARCHIVEDIR" || fail_with_message "ERROR: PGARCHIVEDIR not set"
 
 # Do the backup
 $PGBACKUPCTL -A $PGARCHIVEDIR $BACKUPMETHOD
-rc=$?
+test $? -eq 0 || fail_with_message "ERROR: backup failed"
 
-if [ $rc -ne 0 ]; then
-    echo "ERROR: backup failed" 1>&2
-    exit 6
-fi
-
-# We do a monthly backup, this means we need to pin the current backup
-# and unpin the latest backup.
 if [ $TYPE = "monthly" ]; then
+    # We do a monthly backup, this means we need to pin the current backup.
     $PGBACKUPCTL -A $PGARCHIVEDIR pin latest
-    rc=$?
-    if [ $rc -ne 0 ]; then
-        echo "ERROR: pin backup failed" 1>&2
-        exit 7
-    fi
+    test $? -eq 0 || fail_with_message "ERROR: pin backup failed"
 
-    $PGBACKUPCTL -A $PGARCHIVEDIR unpin earliest
-    rc=$?
-    if [ $rc -ne 0 ]; then
-        echo "ERROR: unpin backup failed" 1>&2
-        exit 8
-    fi
+    # Get a list of all (existing) pinned backups.
+    pinned=$($PGBACKUPCTL -A $PGARCHIVEDIR ls | grep "backup_" | \
+        grep -v "N/A" | grep "Y" | awk '{print $1};')
+
+    # Check each backup, if its older then 2 months unpin it.
+    for backup in $pinned; do
+        backup_date=$(echo $backup | sed -n "s/.*_\(.*\)T\([0-9][0-9]\)\([0-9][0-9]\)\([0-9][0-9]\).*/\1 \2:\3:\4/p")
+        if [ $(date -d "${backup_date} CEST ${KEEPPINNED}" +"%s") -lt $(date +"%s") ]; then
+            echo "UNPIN $backup (it's older then $KEEPPINNED)"
+            $PGBACKUPCTL -A $PGARCHIVEDIR unpin $backup
+        fi
+    done
 fi
 
 # Do the cleanup
 $PGBACKUPCTL -A $PGARCHIVEDIR cleanup $RETENTION
-rc=$?
-
-if [ $rc -ne 0 ]; then
-    echo "ERROR: cleanup failed" 1>&2
-    exit 9
-fi
+test $? -eq 0 || fail_with_message "ERROR: cleanup failed"
 
 exit 0
