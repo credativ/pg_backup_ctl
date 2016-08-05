@@ -1552,7 +1552,7 @@ do_cleanup() {
                 error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
             fi
 
-            $first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
+            first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
             ;;
         [0-9A-F]*[0-9A-F].[0-9A-F]*[0-9A-F].backup.gz)
             first_wal=$(gunzip -c -f "$archivedir/log/$1" | start_wal_location)
@@ -1563,7 +1563,7 @@ do_cleanup() {
                 error "base backup \"$1\" is not complete; log segment \"$last_wal\" is not archived yet"
             fi
 
-            $first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
+            first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
             ;;
         'latest')
             local last_backup
