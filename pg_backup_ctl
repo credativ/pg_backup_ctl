@@ -1702,7 +1702,7 @@ do_cleanup() {
 
     if [ -f "$archivedir"/log/$first_wal ] || [ -f "$archivedir"/log/$first_wal.gz ]; then
         local old_files=$(ls "$archivedir"/log | $SED -n "/$first_wal/q;p")
-       
+
         (
         cd "$archivedir"/log
 
@@ -1729,9 +1729,8 @@ do_cleanup() {
         ##       LVM snapshot needs special handling here, since
         ##       they aren't stored inline the backup catalog.
         for i in $old_base_backups; do
-            local rc
-            basebackup_exists $i
-            rc=$?
+            local rc=0
+            [ basebackup_exists $i ] || rc=$?
 
             if [ "$(_is_pinned $(basename $i))" = "Y" ]; then
                 notice "Skipping pinned basebackup \"${i}\""
@@ -1772,8 +1771,7 @@ basebackup_exists() {
             rc=2
             ;;
         *)
-            test -e "$archivedir/base/${fn}"
-            rc=$?
+            [ -e "$archivedir/base/${fn}" ] && rc=0
             ;;
     esac
 
