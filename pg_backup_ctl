@@ -1527,6 +1527,13 @@ do_cleanup() {
     ##
 
     local fn=$(basename "$1")
+
+
+    ## NOTE: Solaris doesn't like '' in case switches
+    if [ -z "$1" ]; then
+        fn="latest"
+    fi
+
     case $fn in
         rsync_backup_*)
             ## Fall through, same handler for streaming base backups...
@@ -1558,7 +1565,7 @@ do_cleanup() {
 
             $first_wal=$(_perform_basebackup_history_cleanup "" "$first_wal")
             ;;
-        '')
+        'latest')
             local last_backup
             for x in $(ls -r "$archivedir"/log/*.backup* | head -1); do
                 last_wal=$(gunzip -c -f "$x" | stop_wal_location)
@@ -1689,7 +1696,7 @@ do_cleanup() {
 	    return 0
 	    ;;
         *)
-            error "invalid cleanup target specification"
+            error "invalid cleanup target specification: \"$1\""
             ;;
     esac
 
