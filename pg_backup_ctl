@@ -1730,7 +1730,7 @@ do_cleanup() {
         ##       they aren't stored inline the backup catalog.
         for i in $old_base_backups; do
             local rc=0
-            [ basebackup_exists $i ] || rc=$?
+            basebackup_exists $i || rc=$?
 
             if [ "$(_is_pinned $(basename $i))" = "Y" ]; then
                 notice "Skipping pinned basebackup \"${i}\""
