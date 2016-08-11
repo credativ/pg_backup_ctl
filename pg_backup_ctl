@@ -1248,7 +1248,7 @@ do_pin() {
         latest)
             
             ##
-            ## The 'latest' argument pins the oldest available
+            ## The 'latest' argument pins the youngest available
             ## basebackup in the current list. We don't use the
             ## backup history files, since 'latest' means "pin
             ## the most current existing basebackup" !
