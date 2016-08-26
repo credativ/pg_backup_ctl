@@ -584,7 +584,7 @@ do_rsync_basebackup() {
     local tmpfn="$archivedir/base/.rsync_backup_$ts.in-progress"
     local fn="$archivedir/base/rsync_backup_$ts"
     local last_one=$(_get_last_rsync_backup)
-    local rsync_cmd="rsync -q -a --delete  --exclude postmaster.pid --exclude pg_xlog"
+    local rsync_cmd="rsync  -az -c --exclude postmaster.pid --exclude pg_xlog* --exclude pg_replslot/* --delete "
     local rsync_cmd_tblspc="$rsync_cmd"
     local tblspc_oids=""
 
@@ -619,9 +619,13 @@ do_rsync_basebackup() {
     $rsync_cmd "$datadir/" "$tmpfn/" || status=$?
 
     ## non-zero exit status means failed rsync
-    if [ "$status" -ne 0 ]; then
+    ## NOTE: we also check against error code 24 for vanished source files during
+    ##       transfer and ignore it.
+    if [ "$status" -ne 0 ] && [ "$status" -ne 24 ]; then
         # NOTE: We don't want to see any NOTICE messages here, but error messages...
         PGOPTIONS='--client-min-messages=WARNING' psql -Xc "SELECT pg_stop_backup();" 1>/dev/null
+
+        notice "rsync exited with code $status"
         error "error creating base backup, you might need to do a manual cleanup"
     fi
 
@@ -655,11 +659,22 @@ do_rsync_basebackup() {
         ## in the last backup, if any
 
         if [ -d "$last_one/.rsync_tblspc_backup/$i" ]; then
-            $rsync_cmd_tblspc/$i "$(readlink $datadir/pg_tblspc/$i)/" "$tmpfn"/.rsync_tblspc_backup/"$i"/
+            $rsync_cmd_tblspc/$i "$(readlink $datadir/pg_tblspc/$i)/" "$tmpfn"/.rsync_tblspc_backup/"$i"/ || status=$?
         else
             echo "tablespace OID \"$i\" is new, full sync required"
-            $rsync_cmd_tblspc "$(readlink $datadir/pg_tblspc/$i)/" "$tmpfn"/.rsync_tblspc_backup/"$i"/
+            $rsync_cmd_tblspc "$(readlink $datadir/pg_tblspc/$i)/" "$tmpfn"/.rsync_tblspc_backup/"$i"/ || status=$?
         fi
+
+        ## non-zero exit status means failed rsync
+        ## NOTE: we also check against error code 24 for vanished source files during
+        ##       transfer and ignore it.
+        if [ "$status" -ne 0 ] && [ "$status" -ne 24 ]; then
+            # NOTE: We don't want to see any NOTICE messages here, but error messages...
+            PGOPTIONS='--client-min-messages=WARNING' psql -Xc "SELECT pg_stop_backup();" 1>/dev/null
+
+            notice "rsync exited with code $status"
+            error "error creating base backup, you might need to do a manual cleanup"
+    fi
 
     done
 
@@ -699,7 +714,7 @@ do_basebackup() {
 
     [ -f "$fn" ] && error "Basebackup $fn already exists"
     psql -Xc "SELECT pg_start_backup('$fn');" >/dev/null
-    $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_xlog/*' ./backup_label . || status=$?
+    $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_replslot/*' --exclude='pg_xlog/*' ./backup_label . || status=$?
 
     # NOTE: We don't want to see any NOTICE messages here, but error messages...
     PGOPTIONS='--client-min-messages=WARNING' psql -Xc "SELECT pg_stop_backup();" 1>/dev/null
@@ -781,6 +796,17 @@ do_restore_backup() {
             ## does all the remaining leg work.
 
             local tblspc_oid=$(ls "$dn/pg_tblspc")
+
+            # Check for existing tablespace_map. This is rewritten in case
+            # -T is specified.
+            pg_major_ver=$(get_pg_major_version "$dn")
+
+            if [ $pg_major_ver -le 95 ] \
+                && [ ! -z "$tblspc_oid" ] \
+                && [ ! -z "$pgtblspc_replace_dir" ]; then
+                echo -n "" > "$dn"/tablespace_map
+            fi
+
             for i in $tblspc_oid; do
                 _restore_tablespace "$i" "$dn" "$fn"
             done
@@ -843,6 +869,8 @@ _restore_tablespace() {
     local lnk=""
     local adj_symlink
 
+    echo "FN Is $fn"
+
     case "$tblspc_oid" in
         [0-9]*)
 
@@ -854,7 +882,19 @@ _restore_tablespace() {
             else
                 lnk="$pgtblspc_replace_dir/$tblspc_oid"
                 mkdir -p "$lnk"
-                adj_symlink=1
+
+                ## Starting with 9.5 PostgreSQL creates a tablespace_map
+                ## which is used during disaster recovery to restore the symlinks
+                ## in $PGDATA/pg_tblspc. If -T is specified, we need to relocate
+                ## each tablespace OID to its new target by specifying them in
+                ## the tablespace_map accordingly. In this case we aren't allowed
+                ## to adjust the symlinks directly, the startup process would do that
+                ## during recovery.
+                if [ ! -e "$fn"/tablespace_map ]; then
+                    adj_symlink="link"
+                else
+                    adj_symlink="map"
+                fi
             fi
 
             ## link target directory exists?
@@ -881,8 +921,14 @@ _restore_tablespace() {
                 ## as well...
                 if [ ! -z "$adj_symlink" ]; then
                     local pg_major_ver
-                    echo Adjusting symlink "$dn"/pg_tblspc/"$tblspc_oid" to "$lnk"
-                    ln -sf -t "$dn"/pg_tblspc/ "$lnk"
+
+                    if [ "$adj_symlink" = "link" ]; then
+                        echo Adjusting symlink "$dn"/pg_tblspc/"$tblspc_oid" to point to "$lnk"
+                        ln -sf -t "$dn"/pg_tblspc/ "$lnk"
+                    else
+                        echo Remap tablespace $tblspc_oid to "$lnk"
+                        echo "$tblspc_oid $lnk" >> "$dn"/tablespace_map
+                    fi
 
                     pg_major_ver=$(get_pg_major_version "$dn")
                     if [ $pg_major_ver -lt 92 ]; then
@@ -1026,7 +1072,7 @@ do_lvmbasebackup() {
     _create_snapshot_LVM "$fn" "$fn"
 
     ## do the backup, fall through all errors!
-    $TAR --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude=pg_xlog . || status=$?
+    $TAR --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude='pg_xlog/*' --exclude='pg_replslot/*' . || status=$?
 
     ## unmount the snapshot
     _remove_snapshot_LVM || status=$?
