@@ -584,7 +584,7 @@ do_rsync_basebackup() {
     local tmpfn="$archivedir/base/.rsync_backup_$ts.in-progress"
     local fn="$archivedir/base/rsync_backup_$ts"
     local last_one=$(_get_last_rsync_backup)
-    local rsync_cmd="rsync  -aqz -c --exclude postmaster.pid --exclude pg_xlog* --exclude pg_replslot/* --delete "
+    local rsync_cmd="rsync  -aqz -c --exclude postmaster.pid --exclude pg_xlog* --exclude pg_wal* --exclude pg_replslot/* --delete "
     local rsync_cmd_tblspc="$rsync_cmd"
     local tblspc_oids=""
 
@@ -714,7 +714,7 @@ do_basebackup() {
 
     [ -f "$fn" ] && error "Basebackup $fn already exists"
     psql -Xc "SELECT pg_start_backup('$fn');" >/dev/null
-    $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_replslot/*' --exclude='pg_xlog/*' ./backup_label . || status=$?
+    $TAR --force-local -C "$datadir" -c -z -f "$tmpfn" --exclude=postmaster.pid --exclude='pg_replslot/*' --exclude='pg_xlog/*' --exclude='pg_wal/*' ./backup_label . || status=$?
 
     # NOTE: We don't want to see any NOTICE messages here, but error messages...
     PGOPTIONS='--client-min-messages=WARNING' psql -Xc "SELECT pg_stop_backup();" 1>/dev/null
@@ -841,7 +841,13 @@ do_restore_backup() {
     # create pg_xlog/archive_status directory (newer PostgreSQL
     # releases will do this automatically, but it doesn't no harm
     # if done here...)
-    mkdir -p "$dn"/pg_xlog/archive_status
+    pg_major_ver=$(get_pg_major_version "$dn")
+
+    if [ $pg_major_ver -le 96 ]; then
+        mkdir -p "$dn"/pg_xlog/archive_status
+    else
+        mkdir -p "$dn"/pg_wal/archive_status
+    fi
 
     ## place the recovery.conf
     _gen_recovery_conf "$dn"
@@ -1072,7 +1078,7 @@ do_lvmbasebackup() {
     _create_snapshot_LVM "$fn" "$fn"
 
     ## do the backup, fall through all errors!
-    $TAR --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude='pg_xlog/*' --exclude='pg_replslot/*' . || status=$?
+    $TAR --force-local -C "$archivedir/lvm_snapshot/$lvmdatadir" -c -z -f "$fn" --exclude=postmaster.pid --exclude='pg_xlog/*' --exclude='pg_wal/*' --exclude='pg_replslot/*' . || status=$?
 
     ## unmount the snapshot
     _remove_snapshot_LVM || status=$?
@@ -2032,6 +2038,7 @@ case $mode in
         check_rsync_dep
 	check_archivedir current
 	check_datadir
+        warn "currentbackup is deprecated and should not be used any longer"
         run_with_lock do_currentbackup
         ;;
     streambackup)
