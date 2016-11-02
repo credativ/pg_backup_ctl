@@ -62,6 +62,9 @@ source "$CONFDIR/$CLUSTER.conf"
 test $? -eq 0 || \
     fail_with_message "ERROR: could not source \"$CONFDIR/$CLUSTER.conf\""
 
+# Export connection parameters so pg_backup_ctl use it for connections.
+export PGPORT PGHOST PGUSER PGDATA
+
 test -n "$PGARCHIVEDIR" || fail_with_message "ERROR: PGARCHIVEDIR not set"
 
 # Do the backup
@@ -81,7 +84,7 @@ if [ $TYPE = "monthly" ]; then
     for backup in $pinned; do
         # rsync_backup_2016-08-05T143358 -> 2016-08-05 14:33:58
         backup_date=$(echo $backup | sed -n "s/.*_\(.*\)T\([0-9][0-9]\)\([0-9][0-9]\)\([0-9][0-9]\).*/\1 \2:\3:\4/p")
-        if [ $(date -d "${backup_date} CEST ${KEEPPINNED}" +"%s") -lt $(date +"%s") ]; then
+        if [ $(TZ="Europe/Berlin" date -d "${backup_date} ${KEEPPINNED}" +"%s") -lt $(date +"%s") ]; then
             echo "UNPIN $backup (it's older than $KEEPPINNED)"
             $PGBACKUPCTL -A $PGARCHIVEDIR unpin $backup
         fi
