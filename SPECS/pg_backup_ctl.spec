@@ -3,7 +3,7 @@
 Summary: Script to manage online backups with PostgreSQL
 Name:    %{toolname}
 BuildArch: noarch
-Version: 0.8
+Version: 1.0
 Release: 0%{?dist}
 License: BSD
 Group:   Applications/Databases
@@ -44,6 +44,8 @@ rm -rf %{buildroot}
 %{_sysconfdir}/bash_completion.d/
 
 %changelog
+* Fri Dec 09 2016 Bernd Helmle <bernd.helmle@credativ.de>
+- Update to new upstream release 1.0
 * Fri Jan 23 2015 Bernd Helmle <bernd.helmle@credativ.de>
 - Update to new upstream release 0.8
 - Support base backups via rsync

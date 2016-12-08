@@ -30,7 +30,7 @@
 ##
 ## pg_backup_ctl - PostgreSQL transaction log archival backup control program
 ##
-## Version: 0.9
+## Version: 1.0
 
 set -e
 umask 077
