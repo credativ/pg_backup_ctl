@@ -36,6 +36,9 @@ BACKUPMETHOD="rsyncbackup"
 RETENTION="+1"
 KEEPPINNED="+2 months"
 
+# Set TZ to UTC
+export TZ="UTC"
+
 test $# -ge 2 || \
     fail_with_message "Usage: $0 <daily|monthly> <cluster> [<confdir>]"
 
@@ -84,7 +87,7 @@ if [ $TYPE = "monthly" ]; then
     for backup in $pinned; do
         # rsync_backup_2016-08-05T143358 -> 2016-08-05 14:33:58
         backup_date=$(echo $backup | sed -n "s/.*_\(.*\)T\([0-9][0-9]\)\([0-9][0-9]\)\([0-9][0-9]\).*/\1 \2:\3:\4/p")
-        if [ $(TZ="Europe/Berlin" date -d "${backup_date} ${KEEPPINNED}" +"%s") -lt $(date +"%s") ]; then
+        if [ $(date -d "${backup_date}+UTC ${KEEPPINNED}" +"%s") -lt $(date +"%s") ]; then
             echo "UNPIN $backup (it's older than $KEEPPINNED)"
             $PGBACKUPCTL -A $PGARCHIVEDIR unpin $backup
         fi
