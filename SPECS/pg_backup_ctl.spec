@@ -28,6 +28,8 @@ install -m 0755 pg_backup_ctl %{buildroot}/%{_bindir}/
 install -m 644  README.md     %{buildroot}%{_docdir}/%{toolname}/
 install -d %{buildroot}%{_sysconfdir}/bash_completion.d/
 install -m 644  pg-backup-ctl.bash-completion %{buildroot}%{_sysconfdir}/bash_completion.d/
+install -d %{buildroot}%{_mandir}/man1
+install -m 644 %{toolname}.1 %{buildroot}/%{_mandir}/man1/%{toolname}.1*
 
 %clean
 rm -rf %{buildroot}
@@ -42,6 +44,7 @@ rm -rf %{buildroot}
 %{_bindir}/pg_backup_ctl
 %{_docdir}/%{toolname}/README.md
 %{_sysconfdir}/bash_completion.d/
+%{_mandir}/man1/%{toolname}.1*
 
 %changelog
 * Fri Dec 09 2016 Bernd Helmle <bernd.helmle@credativ.de>
@@ -58,7 +61,7 @@ rm -rf %{buildroot}
 - Teach do_ls() to use backup history file from the transaction log archive.
 - Introduce new commands create-lvmsnapshot and remove-lvmsnapshot.
 * Fri Jun  3 2011 Bernd Helmle <bernd.helmle@credativ.de>
-- Fix lock file location to be forced to archivedir, since 
+- Fix lock file location to be forced to archivedir, since
   /var/lock is not writeable by daemons on SLES11.
 - Fix lookup for zipped XLOG files. This could lead to report
   missing XLOG files even when they are actually present in the archive.
