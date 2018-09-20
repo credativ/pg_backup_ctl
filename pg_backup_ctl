@@ -1758,12 +1758,13 @@ do_cleanup() {
         (
         cd "$archivedir"/log
 
-        local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup*' |
-	    if [ -f "$archivedir"/log/$first_wal ]; then
-		$XARGS cat
-	    else
-		$XARGS -r gunzip -d -c
-	    fi | backup_label
+	local old_base_backups=$(echo $old_files | $SED -e 's/ /\n/g' | $GREP -P '^[0-9A-Z]{24}.*.backup*' |
+	    while read label_filename; do
+		case "$label_filename" in
+		    (*.backup.gz) gunzip -c -f < $label_filename ;;
+		    (*.backup) cat $label_filename ;;
+		esac
+	    done | backup_label
 	)
 
         if [ "$cleanup_move" = yes ]; then
