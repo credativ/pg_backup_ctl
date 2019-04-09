@@ -1588,10 +1588,12 @@ do_cleanup() {
 
     case $fn in
         rsync_backup_*)
-            ## Fall through, same handler for streaming base backups...
-            ;&
+            ## Can't fall through in older bash'es...:(
+            first_wal=$(_perform_basebackup_history_cleanup "$fn")
+            ;;
         basebackup_*.tar*)
-            ;&
+            first_wal=$(_perform_basebackup_history_cleanup "$fn")
+            ;;
         streaming_backup_*)
             first_wal=$(_perform_basebackup_history_cleanup "$fn")
             ;;
@@ -1978,7 +1980,10 @@ do_ls() {
                 basesize=0
                 ;;
             rsync_backup_*)
-                ;&
+                ## Same as streaming basebackup, can't fall through in older bash'es...
+                fn="$(basename $fn)"
+                basesize=$(_get_size "$archivedir/base/$fn")
+                ;;
             streaming_backup_*)
                 # This is an archive directory containing a streaming base backup
                 fn="$(basename $fn)"
