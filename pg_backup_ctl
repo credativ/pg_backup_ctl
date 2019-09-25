@@ -1421,7 +1421,8 @@ _get_basebackup_predecessors() {
     local first_wal="$1"
 
     # get a list of the backup history, starting with the given WAL segment
-    ls -td -1 "$archivedir"/log/*.backup | $SED -ne "/$first_wal/,\$ p" | xargs $SED -n -e '/^LABEL:/s/^LABEL://;s/^\s//p' | $TAIL -n+2
+    ls -td -1 "$archivedir"/log/*.backup* | $SED -ne "/$first_wal/,\$ p" |
+	xargs gunzip -c -f | $SED -n -e '/^LABEL:/s/^LABEL://;s/^\s//p' | $TAIL -n+2
 
 }
 
