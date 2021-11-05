@@ -338,13 +338,14 @@ run_with_lock()
 ## Returns the PostgreSQL major version of the specified PGDATA directory
 ## as an integer. That is, the first two digits are concatenated to a unified
 ## number so it can be compared arithmetically (e.g. 9.0.4 will be returned
-## as 90).
+## as 90). If the version is 10 or above, add a 0 at the end to maintain sort
+## order.
 ##
 ## Caller should make sure PGDATA really exists
 ##
 get_pg_major_version() {
 
-    local PGMAJOR=$(cat "$datadir"/PG_VERSION | awk -F'.' '{print $1$2;}')
+    local PGMAJOR=$(cat "$datadir"/PG_VERSION | awk -F'.' '{if ($1 >= 10) print $1$2"0"; else print $1$2;}')
     echo $PGMAJOR
 
 }
