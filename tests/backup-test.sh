@@ -226,8 +226,8 @@ function do_post_setup() {
 	assert test -n "${archive_mode}"
 	assert test "${archive_mode}" != "off"
 	min_version "9.0"
-	local wal_level="$(assert pgdo "psql -tAX -c \"SELECT current_setting('wal_level');\"")"
-	if [ "${wal_level}" != "archive" ] && [ "${wal_level}" != "hot_standby" ] && [ "${wal_level}" != "logical" ]; then # this is such an ugly construct
+	local wal_level="$(pgdo "psql -tAX -c \"SELECT current_setting('wal_level');\"")"
+	if [ "${wal_level}" != "archive" ] && [ "${wal_level}" != "hot_standby" ] && [ "${wal_level}" != "replica" ] && [ "${wal_level}" != "logical" ]; then # this is such an ugly construct
 		log "wal_level was not set correctly!"
 		assert false
 	fi
