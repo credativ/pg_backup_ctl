@@ -522,15 +522,23 @@ do_currentbackup() {
 
     local files x y
 
+    pg_major_ver=$(get_pg_major_version "$dn")
+
+    if [ $pg_major_ver -le 96 ]; then
+        waldir="pg_xlog"
+    else
+        waldir="pg_wal"
+    fi
+
     # identify unarchived files
-    for x in $(ls -r "$datadir"/pg_xlog/ | $GREP -E '^[0-9A-F]{24}$'); do
-        if [ ! -f "$datadir"/pg_xlog/archive_status/$x.done ]; then
+    for x in $(ls -r "$datadir"/"$waldir"/ | $GREP -E '^[0-9A-F]{24}$'); do
+        if [ ! -f "$datadir"/"$waldir"/archive_status/$x.done ]; then
             files="$files $x"
         fi
     done
 
     # copy unarchived files
-    (cd "$datadir"/pg_xlog/ && rsync $files "$archivedir"/current/)
+    (cd "$datadir"/"$waldir"/ && rsync $files "$archivedir"/current/)
 
     # remove previously copied files that are now archived
     for x in $(cd "$archivedir"/current && ls); do
