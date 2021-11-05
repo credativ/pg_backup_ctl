@@ -1,4 +1,4 @@
-pg-backup-ctl (0.9) UNRELEASED; urgency=medium
+pg-backup-ctl (1.0) UNRELEASED; urgency=medium
 
   * Add pandoc to Build-Depends.
   * Depends: postgresql-client, Suggests: rsync.
